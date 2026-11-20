@@ -1,0 +1,26 @@
+# Go
+/bin/
+/dist/
+*.exe
+*.exe~
+*.test
+*.out
+*.prof
+coverage.txt
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local lab artifacts (never commit lab state, evidence bundles, or ISOs)
+/lab/state/
+/lab/artifacts/
+/lab/*.iso
+/lab/**/*.vbox*
+/lab/**/*.vmware*
+
+# Secrets / scope manifests with real targets
+*.local.yaml
+*.local.yml
