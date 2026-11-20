@@ -1,0 +1,19 @@
+{
+  "version": "0.1",
+  "mode": "validate",
+  "name": "lab-lite-demo",
+  "targets": [
+    { "kind": "cidr", "value": "172.20.0.0/16", "comment": "hesper lab docker network" },
+    { "kind": "host", "value": "localhost", "comment": "host-bound lab ports" }
+  ],
+  "allow": {
+    "technique_ids": [],
+    "classes": ["web", "creds"],
+    "adapters": ["proc", "lib"]
+  },
+  "deny": ["T1098"],
+  "budget": { "max_actions": 50, "max_minutes": 30 },
+  "stop_conditions": [
+    "web entry proven or disproven on all lab web targets"
+  ]
+}

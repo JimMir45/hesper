@@ -1,0 +1,20 @@
+{
+  "version": "0.1",
+  "model": {
+    "provider": "openai_compatible",
+    "endpoint": "http://localhost:8000/v1",
+    "model": "placeholder-for-m0",
+    "api_key_env": "HESPER_MODEL_API_KEY"
+  },
+  "planner": {
+    "max_proposals_per_turn": 3,
+    "temperature": 0
+  },
+  "judge": {
+    "mode": "offline",
+    "correlation_window_s": 120
+  },
+  "budgets": {
+    "max_planner_calls": 200
+  }
+}
