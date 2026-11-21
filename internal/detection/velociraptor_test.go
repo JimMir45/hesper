@@ -18,7 +18,7 @@ func runFakeVelo(fixture string) (func(ctx context.Context, name string, args ..
 	var calls []string
 	factory := func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		mu.Lock()
-		calls = append(append([]string{name}, args...))
+		calls = append(calls, append([]string{name}, args...)...)
 		mu.Unlock()
 		return exec.CommandContext(ctx, "printf", "%s", fixture)
 	}
