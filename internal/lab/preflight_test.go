@@ -30,7 +30,7 @@ func fakeProbes(vendor, virtFlag string, kvm bool, wslVagrant, wslVBox, hostVagr
 func TestPreflightIntelKVMRecommendsWSL2(t *testing.T) {
 	p := &Preflight{
 		LabRoot: "lab",
-		Probes:  fakeProbes("GenuineIntel", "vmx", true, true, false, false, true, 16, 32, 200),
+		Probes:  fakeProbes("GenuineIntel", "vmx", true, true, false, false, true, 32, 64, 200),
 	}
 	r := p.Run()
 	if !r.CPU.WSL2KVMPath || r.RecommendedPath != "wsl2-kvm" {
@@ -41,7 +41,21 @@ func TestPreflightIntelKVMRecommendsWSL2(t *testing.T) {
 		t.Fatalf("expected ready, gaps=%v", r.Gaps)
 	}
 	if !r.Resources.LiteVMSFits || !r.Resources.FullFits {
-		t.Fatalf("16GB WSL ram + 200GB disk must fit lite-vms (and full needs 24 — expected false ok): lite=%v full=%v", r.Resources.LiteVMSFits, r.Resources.FullFits)
+		t.Fatalf("32GB WSL ram + 200GB disk must fit both profiles: lite=%v full=%v", r.Resources.LiteVMSFits, r.Resources.FullFits)
+	}
+}
+
+func TestPreflightWSL2PathRAMPool(t *testing.T) {
+	// Host has 64GB but the wsl2-kvm path draws from the WSL pool (16GB):
+	// lite-vms fits, full (24GB) does not — the pool choice must follow the
+	// recommended path, not the largest number available.
+	p := &Preflight{
+		LabRoot: "lab",
+		Probes:  fakeProbes("GenuineIntel", "vmx", true, true, false, false, true, 16, 64, 200),
+	}
+	r := p.Run()
+	if !r.Resources.LiteVMSFits || r.Resources.FullFits {
+		t.Fatalf("wsl2-kvm pool=16GB: lite=%v (want true), full=%v (want false)", r.Resources.LiteVMSFits, r.Resources.FullFits)
 	}
 }
 
@@ -125,11 +139,15 @@ func TestPreflightResourceGapLowDisk(t *testing.T) {
 }
 
 func TestPreflightHumanOutputMentionsPath(t *testing.T) {
+	// Host tools present, resources ample: ready run — gaps section absent.
 	p := &Preflight{LabRoot: "lab", Probes: fakeProbes("AuthenticAMD", "svm", false, false, false, true, true, 15, 32, 200)}
 	out := p.Run().Human()
-	for _, want := range []string{"windows-host", "AuthenticAMD", "gaps", "profiles"} {
+	for _, want := range []string{"windows-host", "AuthenticAMD", "profiles", "ready = true"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("human output must mention %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "gaps:") {
+		t.Fatalf("ready run must not list gaps:\n%s", out)
 	}
 }
