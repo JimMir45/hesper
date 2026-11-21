@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/JimMir45/hesper/internal/adapters"
+	"github.com/JimMir45/hesper/internal/egress"
 	"github.com/JimMir45/hesper/internal/evidence"
 )
 
@@ -165,7 +166,14 @@ func (a *Adapter) Execute(ctx context.Context, req adapters.ExecRequest, emit ad
 		}
 	}
 
-	return adapters.ExecResult{Success: success, Detail: detail, NotHappened: notHappened, ExitCode: exitCode}, nil
+	// Egress enforcement on vm actions is declaration + audit (design §7):
+	// guest traffic does not traverse the host process stack, so no local
+	// proxy can intercept it. Reported honestly — never claimed as
+	// interception.
+	return adapters.ExecResult{
+		Success: success, Detail: detail, NotHappened: notHappened, ExitCode: exitCode,
+		EnforcedEgress: egress.LevelDeclared,
+	}, nil
 }
 
 func relToWork(work, p string) string {

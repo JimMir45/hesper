@@ -53,6 +53,13 @@ type Budget struct {
 	MaxMinutes int `json:"max_minutes"`
 }
 
+// TargetInScope reports whether a bare host/IP is an authorized target —
+// the same fail-closed matching the authorization gate uses (design §5.3:
+// adapters egress only toward in-scope targets; the egress guard reuses it).
+func (m *ScopeManifest) TargetInScope(target string) bool {
+	return m.targetAllowed(target)
+}
+
 // LoadScope reads and validates a scope manifest from a JSON file.
 func LoadScope(path string) (*ScopeManifest, error) {
 	b, err := os.ReadFile(path)

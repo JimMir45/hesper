@@ -21,6 +21,19 @@ type RunConfig struct {
 	Planner PlannerCfg  `json:"planner,omitempty"`
 	Judge   JudgeCfg    `json:"judge,omitempty"`
 	Budgets *CallBudgets `json:"budgets,omitempty"`
+	Egress  *EgressCfg  `json:"egress,omitempty"`
+}
+
+// EgressCfg selects runtime egress enforcement (design §7): "proxy" (default)
+// routes proc children through the local control guard; "off" disables it
+// (kernel type discipline only — reported as level "none" in audits).
+type EgressCfg struct {
+	Mode string `json:"mode,omitempty"` // proxy | off
+}
+
+// EgressEnabled reports whether runtime egress enforcement is on.
+func (c *RunConfig) EgressEnabled() bool {
+	return c.Egress != nil && c.Egress.Mode != "off"
 }
 
 // Model describes the planner's model access. The API key is referenced by
@@ -102,6 +115,12 @@ func (c *RunConfig) applyDefaults() {
 	if c.Judge.CorrelationWindowS == 0 {
 		c.Judge.CorrelationWindowS = 120
 	}
+	if c.Egress == nil {
+		c.Egress = &EgressCfg{Mode: "proxy"}
+	}
+	if c.Egress.Mode == "" {
+		c.Egress.Mode = "proxy"
+	}
 }
 
 // Validate enforces contract invariants. Fail-closed: unknown structure is
@@ -134,6 +153,9 @@ func (c *RunConfig) Validate() error {
 	}
 	if c.Judge.Mode != "" && c.Judge.Mode != "auto" && c.Judge.Mode != "velociraptor" && c.Judge.Mode != "offline" {
 		return fmt.Errorf("judge.mode must be auto|velociraptor|offline, got %q", c.Judge.Mode)
+	}
+	if c.Egress != nil && c.Egress.Mode != "" && c.Egress.Mode != "proxy" && c.Egress.Mode != "off" {
+		return fmt.Errorf("egress.mode must be proxy|off, got %q", c.Egress.Mode)
 	}
 	return nil
 }

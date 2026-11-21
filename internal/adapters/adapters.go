@@ -39,6 +39,13 @@ type ExecResult struct {
 	// finding may reference it.
 	NotHappened bool
 	ExitCode    int
+	// EgressViolations lists destinations the runtime guard refused during
+	// THIS action (design §5.3/§7). Non-empty ⇒ the action failed.
+	EgressViolations []string
+	// EnforcedEgress reports which egress enforcement level actually applied
+	// (egress.LevelProxy | LevelDeclared | LevelNone) — the engine audits it
+	// so claims always match enforcement reality.
+	EnforcedEgress string
 }
 
 // EmitFunc persists one evidence record (the driver binds it to the chain).

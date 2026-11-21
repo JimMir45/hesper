@@ -20,6 +20,7 @@ import (
 	"github.com/JimMir45/hesper/internal/adapters"
 	"github.com/JimMir45/hesper/internal/adapters/proc"
 	"github.com/JimMir45/hesper/internal/config"
+	"github.com/JimMir45/hesper/internal/egress"
 	"github.com/JimMir45/hesper/internal/engine"
 	"github.com/JimMir45/hesper/internal/evidence"
 	"github.com/JimMir45/hesper/internal/findings"
@@ -451,10 +452,25 @@ func runEngine(in engineInput) int {
 		close(abort)
 	}()
 
+	// Runtime egress enforcement (design §7): the guard lives for the whole
+	// run; children of proc actions egress through it.
+	procAdapter := proc.New()
+	if in.cfg.EgressEnabled() {
+		guard, gerr := egress.NewGuard(in.scope)
+		if gerr != nil {
+			fmt.Fprintln(os.Stderr, "egress guard:", gerr)
+			return exitOperational
+		}
+		guard.Start()
+		defer guard.Close()
+		procAdapter = proc.NewWithGuard(guard)
+		fmt.Printf("egress: runtime enforcement on (local guard %s, level %s)\n", guard.Addr(), egress.LevelProxy)
+	}
+
 	res, err := engine.Run(ctx, engine.Options{
 		RunDir: in.runDir, RunID: filepath.Base(in.runDir),
 		Scope: in.scope, Cfg: in.cfg, Registry: registry,
-		Adapters: map[string]adapters.Adapter{"proc": proc.New()},
+		Adapters: map[string]adapters.Adapter{"proc": procAdapter},
 		Planner:  p, Audit: in.audit, Chain: chain, Budget: budgeter,
 		ForceAbort: abort,
 	})
@@ -649,7 +665,22 @@ func runScripted(in scriptedRunInput) int {
 	}
 
 	// Adapters: proc is the only kind implemented in M2 (lib/vm land with M4).
-	adaptersByName := map[string]adapters.Adapter{"proc": proc.New()}
+	// Egress enforcement (design §7) applies to the scripted driver too.
+	scriptedProc := proc.New()
+	if in.cfg.EgressEnabled() {
+		guard, gerr := egress.NewGuard(in.scope)
+		if gerr != nil {
+			fmt.Fprintln(os.Stderr, "egress guard:", gerr)
+			return exitOperational
+		}
+		guard.Start()
+		defer guard.Close()
+		scriptedProc = proc.NewWithGuard(guard)
+		fmt.Printf("egress: runtime enforcement on (local guard %s, level %s)\n", guard.Addr(), egress.LevelProxy)
+	}
+	adaptersByName := map[string]adapters.Adapter{"proc": scriptedProc}
+	egressMonitor := kernel.NewEgressMonitor(0)
+	egressStopped := false
 
 	budgeter := kernel.NewBudgeter(in.scope.Budget)
 	chain, err := evidence.OpenChain(runDirAbs)
@@ -747,10 +778,28 @@ func runScripted(in scriptedRunInput) int {
 		if res.NotHappened {
 			line.Status = "not_happened"
 		}
+		// Egress violations: audited per destination; 3 strikes stop the run
+		// (design §6) — the scripted driver drains to REPORT then exits 1.
+		for _, dest := range res.EgressViolations {
+			strikes, stop := egressMonitor.Record()
+			in.audit.Append("kernel.egress_violation", map[string]any{
+				"step": step.ID, "dest": dest, "strikes": strikes,
+			})
+			if stop {
+				egressStopped = true
+			}
+		}
+		if res.EnforcedEgress != "" {
+			in.audit.Append("egress.enforcement", map[string]any{"step": step.ID, "level": res.EnforcedEgress})
+		}
 		line.Detail = res.Detail
 		outcomes = append(outcomes, outcome)
 		stepLines = append(stepLines, line)
 		stepsExecuted++
+		if egressStopped {
+			fmt.Fprintf(os.Stderr, "hesper: egress policy stop after %d violation(s) — remaining steps skipped, exit 1\n", egressMonitor.Count())
+			break // stop accepting; this step drained (design §6)
+		}
 	}
 
 	// Evidence gate: findings may only rest on a verified chain (design
@@ -796,6 +845,9 @@ func runScripted(in scriptedRunInput) int {
 	})
 	fmt.Printf("scripted run done: %s\n  steps executed: %d / %d\n  findings: %d (proven=%d disproven=%d detection_gap=%d)\n  outputs: findings.json report.md evidence/chain.jsonl\n",
 		in.runDir, stepsExecuted, len(plan.Steps), len(found), prov, disp, gap)
+	if egressStopped {
+		return exitOperational // design §6: egress policy stop exits 1
+	}
 	return exitOK
 }
 

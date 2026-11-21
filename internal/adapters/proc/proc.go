@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/JimMir45/hesper/internal/adapters"
+	"github.com/JimMir45/hesper/internal/egress"
 	"github.com/JimMir45/hesper/internal/evidence"
 )
 
@@ -24,10 +25,22 @@ type Proc struct {
 	LookPath func(file string) (string, error)
 	// CommandContext is injectable for tests; defaults to exec.CommandContext.
 	CommandContext func(ctx context.Context, name string, args ...string) *exec.Cmd
+	// Guard, when set, is the runtime egress enforcer (design §7 M4+):
+	// children run with proxy env pointing at the guard, and any refused
+	// destination fails the action and is reported for audit. Nil ⇒
+	// LevelNone (type discipline only), reported honestly.
+	Guard *egress.Guard
 }
 
-// New returns a Proc adapter with the real exec bindings.
-func New() *Proc { return &Proc{LookPath: exec.LookPath, CommandContext: exec.CommandContext} }
+// New returns a Proc adapter with the real exec bindings, no runtime egress
+// enforcement.
+func New() *Proc { return NewWithGuard(nil) }
+
+// NewWithGuard returns a Proc adapter whose children egress through the
+// local control proxy (proxy-aware clients intercepted, design §7).
+func NewWithGuard(g *egress.Guard) *Proc {
+	return &Proc{LookPath: exec.LookPath, CommandContext: exec.CommandContext, Guard: g}
+}
 
 func (p *Proc) Kind() string { return "proc" }
 
@@ -82,11 +95,20 @@ func (p *Proc) Execute(ctx context.Context, req adapters.ExecRequest, emit adapt
 	stderrPath := filepath.Join(req.WorkDir, "stderr.txt")
 
 	cmd := p.commandContext(ctx, argv[0], argv[1:]...)
-	// Egress discipline (design §5.3): strip ambient proxy variables from the
-	// child environment. An inherited http_proxy silently reroutes — or
-	// breaks — scoped targets (found live in M2: loopback probes died on a
-	// corporate proxy with HTTP 502 before this).
-	cmd.Env = stripProxyEnv()
+	// Egress discipline (design §5.3/§7): ambient proxy variables are always
+	// stripped — an inherited http_proxy silently reroutes or breaks scoped
+	// targets (found live in M2: loopback probes died on a corporate proxy
+	// with HTTP 502 before this). With a guard, the child's proxy IS the
+	// guard: traffic flows through policy enforcement (proxy-aware clients).
+	violationsBefore := 0
+	enforcedLevel := egress.LevelNone
+	if p.Guard != nil {
+		violationsBefore = p.Guard.ViolationCount()
+		enforcedLevel = egress.LevelProxy
+		cmd.Env = append(stripProxyEnv(), egress.EnvFor(p.Guard.Addr())...)
+	} else {
+		cmd.Env = stripProxyEnv()
+	}
 	outF, err := os.Create(stdoutPath)
 	if err != nil {
 		return adapters.ExecResult{}, fmt.Errorf("proc: create %s: %w", stdoutPath, err)
@@ -121,7 +143,17 @@ func (p *Proc) Execute(ctx context.Context, req adapters.ExecRequest, emit adapt
 	if runErr != nil {
 		detail += fmt.Sprintf("; run error: %v", runErr)
 	}
-	res := adapters.ExecResult{Success: success, Detail: detail, ExitCode: exitCode}
+	res := adapters.ExecResult{Success: success, Detail: detail, ExitCode: exitCode, EnforcedEgress: enforcedLevel}
+
+	// Egress violations during this action fail it outright (design §5.3),
+	// even if the child somehow exited 0.
+	if p.Guard != nil {
+		if viol := p.Guard.ViolationsSince(violationsBefore); len(viol) > 0 {
+			res.EgressViolations = viol
+			res.Success = false
+			res.Detail = fmt.Sprintf("egress violation: refused %v — destination outside scope; %s", viol, detail)
+		}
+	}
 
 	// Collect artifacts for the declared must_capture kinds (design §5.3:
 	// collect is part of execute, driven by must_capture).

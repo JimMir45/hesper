@@ -36,6 +36,11 @@ const (
 // ExitKill is the kill-switch exit code (design §6).
 const ExitKill = 130
 
+// ExitEgressPolicy is the egress-violation policy stop exit code (design §6:
+// AdapterEgressViolation count ≥3 ⇒ STOPPED, exit 1 — distinct from the kill
+// switch's 130).
+const ExitEgressPolicy = 1
+
 const quarantineThreshold = 3 // consecutive failures before a card is quarantined for the run
 
 // Options wires one run of the engine.
@@ -56,6 +61,8 @@ type Options struct {
 	MaxEvidenceTail  int           // default 8
 	// ForceAbort, when closed, escalates a stop into ABORTED (second signal).
 	ForceAbort <-chan struct{}
+	// Egress is the violation monitor (design §6). Nil ⇒ default threshold.
+	Egress *kernel.EgressMonitor
 }
 
 // Result is the run's outcome.
@@ -98,6 +105,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	var steps []report.StepLine
 	var lastFeedback []planner.Feedback
 	budgetGone := false
+	egressStopped := false
+	if o.Egress == nil {
+		o.Egress = kernel.NewEgressMonitor(0)
+	}
 
 	setState(st, "ENGAGE", runDirAbs)
 
@@ -161,7 +172,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			if terminal != "" || ctx.Err() != nil {
 				break // stop accepting; drain happened (actions are sequential)
 			}
-			fb, outcome, line, ran := processProposal(ctx, o, st, runDirAbs, quarantine, failStreak, p)
+			fb, outcome, line, ran, estop := processProposal(ctx, o, st, runDirAbs, quarantine, failStreak, p)
 			lastFeedback = append(lastFeedback, fb)
 			if outcome != nil {
 				outcomes = append(outcomes, *outcome)
@@ -169,6 +180,14 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			}
 			if ran {
 				st.Executed++
+			}
+			if estop {
+				// Egress policy stop (design §6): ≥3 violations ⇒ STOPPED,
+				// exit 1. Not a kill: the loop drains (sequential actions)
+				// and reports normally.
+				egressStopped = true
+				terminal = TerminalStopped
+				break
 			}
 			if fb.Kind == planner.FeedbackBudget {
 				budgetGone = true
@@ -190,7 +209,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if terminal == "" {
 		terminal = TerminalDone
 	}
-	res := &Result{Terminal: terminal, ExitCode: exitOf(terminal), Steps: steps, Turns: st.Turn, Executed: st.Executed}
+	exit := exitOf(terminal)
+	if egressStopped {
+		exit = ExitEgressPolicy
+	}
+	res := &Result{Terminal: terminal, ExitCode: exit, Steps: steps, Turns: st.Turn, Executed: st.Executed}
 
 	// CORRELATE + REPORT (M3: detection correlation lands M4; Build applies
 	// the formal gap rule over recorded evidence).
@@ -220,11 +243,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 // processProposal walks one proposal through resolve → gate → spend →
 // execute, producing feedback, an outcome (when the action was attempted or
-// referenced), and a step line.
+// referenced), a step line, and whether the egress policy stop tripped.
 func processProposal(
 	ctx context.Context, o Options, st *runState, runDirAbs string,
 	quarantine map[string]bool, failStreak map[string]int, p planner.Proposal,
-) (planner.Feedback, *findings.Outcome, report.StepLine, bool) {
+) (planner.Feedback, *findings.Outcome, report.StepLine, bool, bool) {
 	actionID := fmt.Sprintf("a-%03d", st.Executed+1)
 	outcome := &findings.Outcome{StepID: actionID, Assertion: p.Assertion, Repro: p.Repro}
 	line := report.StepLine{StepID: actionID, CardID: p.CardID, Target: p.Target, Status: "executed"}
@@ -238,20 +261,20 @@ func processProposal(
 
 	// Resolve: quarantined?
 	if quarantine[p.CardID] {
-		return reject("card quarantined for this run"), outcome, line, false
+		return reject("card quarantined for this run"), outcome, line, false, false
 	}
 	// Resolve: unknown card = hallucination (design §5.6).
 	card, ok := o.Registry.Get(p.CardID)
 	if !ok {
-		return reject("unknown_card"), outcome, line, false
+		return reject("unknown_card"), outcome, line, false, false
 	}
 	outcome.Card = card
 	// Resolve: params against the argv contract.
 	if reason := validateParams(card, p); reason != "" {
-		return reject(reason), outcome, line, false
+		return reject(reason), outcome, line, false, false
 	}
 	if p.Target == "" {
-		return reject("missing target"), outcome, line, false
+		return reject("missing target"), outcome, line, false, false
 	}
 
 	// Gate (design §5.1 fixed order).
@@ -266,7 +289,7 @@ func processProposal(
 		outcome.Denied = dec.Reason
 		line.Status = "denied"
 		line.Detail = dec.Reason
-		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackDenied, Reason: dec.Reason}, outcome, line, false
+		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackDenied, Reason: dec.Reason}, outcome, line, false, false
 	}
 
 	// Spend.
@@ -274,7 +297,7 @@ func processProposal(
 		_ = o.Audit.Append("budget.exhausted", map[string]any{"action": actionID, "reason": reason})
 		line.Status = "skipped_budget"
 		line.Detail = reason
-		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackBudget, Reason: reason}, outcome, line, false
+		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackBudget, Reason: reason}, outcome, line, false, false
 	}
 	used, _ := o.Budget.Dump()
 	st.BudgetUsed = used
@@ -286,7 +309,7 @@ func processProposal(
 		_ = o.Audit.Append("adapter.unavailable", map[string]any{"action": actionID, "reason": reason})
 		line.Status = "not_happened"
 		line.Detail = reason
-		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackFailed, Reason: reason}, outcome, line, false
+		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackFailed, Reason: reason}, outcome, line, false, false
 	}
 
 	workDir := filepath.Join(runDirAbs, "evidence", actionID)
@@ -309,7 +332,26 @@ func processProposal(
 		line.Status = "not_happened"
 		line.Detail = execErr.Error()
 		failStreak[card.ID]++
-		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackFailed, Reason: execErr.Error()}, outcome, line, false
+		return planner.Feedback{CardID: card.ID, Kind: planner.FeedbackFailed, Reason: execErr.Error()}, outcome, line, false, false
+	}
+
+	// Egress enforcement honesty + violations (design §5.3/§6/§7): the level
+	// that ACTUALLY applied is audited per action; every refused destination
+	// is a kernel.egress_violation event; the monitor trips the policy stop.
+	if res.EnforcedEgress != "" {
+		_ = o.Audit.Append("egress.enforcement", map[string]any{
+			"action": actionID, "adapter": card.Executor.Adapter, "level": res.EnforcedEgress,
+		})
+	}
+	egressStop := false
+	for _, dest := range res.EgressViolations {
+		strikes, stop := o.Egress.Record()
+		_ = o.Audit.Append("kernel.egress_violation", map[string]any{
+			"action": actionID, "dest": dest, "strikes": strikes, "threshold": "3",
+		})
+		if stop {
+			egressStop = true
+		}
 	}
 
 	outcome.Record = tailRecord(runDirAbs)
@@ -333,7 +375,7 @@ func processProposal(
 	if !res.Success {
 		kind = planner.FeedbackFailed
 	}
-	return planner.Feedback{CardID: card.ID, Kind: kind, Reason: res.Detail}, outcome, line, true
+	return planner.Feedback{CardID: card.ID, Kind: kind, Reason: res.Detail}, outcome, line, true, egressStop
 }
 
 // validateParams enforces the v0 params contract: every {params.NAME} the

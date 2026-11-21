@@ -1,0 +1,18 @@
+{
+  "version": "0.1",
+  "id": "fixture.egress-violation",
+  "title": "Deliberate out-of-scope connection (enforcement acceptance fixture)",
+  "attack": { "technique_id": "T1041", "tactic": "exfiltration" },
+  "provenance": {
+    "source_repo": "https://github.com/JimMir45/hesper",
+    "commit": "fixture",
+    "license": "Apache-2.0"
+  },
+  "reuse": "embedded",
+  "executor": {
+    "adapter": "proc",
+    "argv": ["curl", "-f", "--max-time", "5", "-o", "{params.out_file}", "{params.url}"]
+  },
+  "evidence": { "must_capture": ["stderr"] },
+  "risks": "Fixture for design §7 acceptance: connects to a TEST-NET-3 (RFC 5737 documentation) address that no scope legitimately contains. The runtime egress guard must refuse it, the action must fail, and three strikes must stop the run (design §6). Never point this at a real network."
+}

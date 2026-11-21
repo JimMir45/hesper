@@ -35,6 +35,12 @@ Every major decision is grounded in documented, license-audited research:
 
 Hesper runs **only against explicitly authorized targets**, and ships with a legitimate practice range so there is no reason to point it at anything else. The scope manifest is not advisory: out-of-scope actions are refused before execution, and every action is written to the audit log.
 
+How far that refusal actually reaches — stated exactly, never oversold (see the [design doc's enforcement matrix](docs/design.md#7-governance-enforcement-staging-honesty-clause)):
+
+- **proc actions** run through a local egress guard that intercepts proxy-aware clients and refuses out-of-scope destinations (violation ⇒ action fails + audit; three violations ⇒ the run stops with exit 1). Proxy-unaware raw sockets are not intercepted.
+- **vm actions** carry the scope as a declared, audited policy — guest traffic does not traverse the host stack, so this level is declaration, not interception.
+- Every action records which level actually applied (`egress.enforcement` in the audit log), so a report can never claim more enforcement than happened.
+
 ## License
 
 [Apache-2.0](LICENSE). Third-party attack actions are reused from open-source projects with per-card provenance (source repo, commit, license) — see the [architecture doc](docs/architecture.md).

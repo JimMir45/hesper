@@ -309,7 +309,16 @@ Profiles: **lite** (~8–10 GB: VAmPI + DVWA + Velociraptor server; VM subset la
 ## 7. Governance enforcement staging (honesty clause)
 
 - **M0–M3**: enforcement = kernel target gate + by-construction adapter contract (adapters accept kernel-validated `Target` refs only; proc templates are argv-strict). This is code review + type discipline, not network enforcement.
-- **M4+ hardening**: technical egress enforcement (network namespace / local control proxy) wraps proc/vm execution; acceptance test = deliberate egress-violation card is blocked and audited.
+- **M4+ hardening (shipped, M4-5)**: runtime egress enforcement via a **local control proxy** (`internal/egress`): proc children run with proxy env pointing at the guard, which refuses any destination outside the scope manifest (403 + `kernel.egress_violation` audit + action failed). Violations count against a run-wide monitor: **≥3 ⇒ policy STOPPED, exit 1** (§6 — distinct from the kill switch's 130).
+- **Enforcement reality matrix** (what each adapter actually gets, audited per action as `egress.enforcement{level}` so reports can never claim more than was enforced):
+
+| Adapter | Level | Reach |
+|---|---|---|
+| proc (guard on, default) | `proxy` | proxy-AWARE clients (curl, wget, most scanners) are intercepted and refused out-of-scope. Proxy-unaware raw sockets bypass the proxy — full coverage would need netns/LD_PRELOAD, which is not portable across the WSL/Windows-host matrix. |
+| proc (guard off, `egress.mode: off`) | `none` | kernel target gate + argv-strict type discipline only. |
+| vm | `declared+audit` | the scope policy is declared and audited per action, but guest traffic does not traverse the host process stack — no local proxy can intercept it. Honest declaration, not interception. |
+
+- Acceptance (design §7): the deliberate violation fixture `internal/adapters/proc/testdata/egress-violation.card.json` (TEST-NET-3 destination no legitimate scope contains) is blocked, fails its action, and trips the policy stop at three strikes — proven by `TestGuardedViolationFailsAction`, `TestEgressThreeStrikesStopsRunWithExit1`, and the guard-level tests.
 - The README and design stay honest about this staging; ARTEX's lesson is that trust claims must match enforcement reality.
 
 ## 8. Testing and verification strategy
