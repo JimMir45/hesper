@@ -1,0 +1,28 @@
+{
+  "version": "0.1",
+  "id": "endpoint-ntdsutil-susp-usage",
+  "title": "Suspicious ntdsutil invocation pattern (snapshot creation, lab DC)",
+  "attack": { "technique_id": "T1003.003", "tactic": "credential-access" },
+  "provenance": {
+    "source_repo": "https://github.com/redcanaryco/atomic-red-team",
+    "commit": "a0e3f9bc69fed2fd711bd1f1aa87a40c33482fe6",
+    "license": "MIT"
+  },
+  "reuse": "embedded",
+  "preconditions": {
+    "phase": "endpoint",
+    "os": ["windows"],
+    "notes": "lighter-weight variant: ntdsutil snapshot list/create only, no dump material"
+  },
+  "executor": {
+    "adapter": "vm",
+    "argv": ["actions/endpoint/files/ntdsutil_snapshot.ps1"]
+  },
+  "evidence": { "must_capture": ["stdout", "file"] },
+  "detection": {
+    "expected_sigma": [
+      "Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)"
+    ]
+  },
+  "risks": "read-mostly ntdsutil snapshot operations inside the lab VM only"
+}

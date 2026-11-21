@@ -1,0 +1,29 @@
+{
+  "version": "0.1",
+  "id": "endpoint-ntds-ifm-dump",
+  "title": "Dump NTDS.dit via ntdsutil Install-From-Media (lab DC)",
+  "attack": { "technique_id": "T1003.003", "tactic": "credential-access" },
+  "provenance": {
+    "source_repo": "https://github.com/redcanaryco/atomic-red-team",
+    "commit": "a0e3f9bc69fed2fd711bd1f1aa87a40c33482fe6",
+    "license": "MIT"
+  },
+  "reuse": "embedded",
+  "preconditions": {
+    "phase": "endpoint",
+    "os": ["windows"],
+    "notes": "AD domain controller in the bundled lab range; requires Directory Service Restore Mode rights as staged by the lab"
+  },
+  "executor": {
+    "adapter": "vm",
+    "argv": ["actions/endpoint/files/ntds_ifm_dump.ps1"]
+  },
+  "evidence": { "must_capture": ["stdout", "file"] },
+  "detection": {
+    "expected_sigma": [
+      "Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)",
+      "Suspicious Process Patterns NTDS.DIT Exfil"
+    ]
+  },
+  "risks": "writes a dump under C:\\hesper\\out inside the lab VM only; kernel-scoped to the lab range"
+}
