@@ -143,7 +143,7 @@ func TestGuardAllowsConnectToScope(t *testing.T) {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := conn.Write([]byte("CONNECT " + fmtPort(ln) + " HTTP/1.1\r\nHost: " + fmtPort(ln) + "\r\n\r\n")); err != nil {
+	if _, err := conn.Write([]byte("CONNECT " + authority(ln) + " HTTP/1.1\r\nHost: " + authority(ln) + "\r\n\r\n")); err != nil {
 		t.Fatal(err)
 	}
 	// The 200 response and the tunneled upstream bytes arrive as separate
@@ -210,13 +210,9 @@ func TestEnvForShapesProxyEnvironment(t *testing.T) {
 	}
 }
 
-func fmtPort(ln net.Listener) string {
-	addr := ln.Addr().String() // "127.0.0.1:p" or "[::1]:p"
-	if strings.HasPrefix(addr, "[") {
-		return addr // bracketed IPv6 literal is already CONNECT-ready
-	}
-	return strings.TrimPrefix(addr, "127.0.0.1:")
-}
+// authority returns the listener's full host:port ("127.0.0.1:p" or
+// "[::1]:p") — CONNECT-ready for both families.
+func authority(ln net.Listener) string { return ln.Addr().String() }
 
 // listenLoopbackRetry: try IPv4 then IPv6 loopback (httptest-style) —
 // mirrored-mode WSL can lose IPv4 loopback binding entirely.
