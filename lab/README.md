@@ -44,7 +44,28 @@ can run the Windows-VM layer:
 
 Exit 0 = ready (no gaps); exit 1 = gaps listed. Run it before any M4 spend.
 
-## full (AD lateral chain) — lands with M4
+## lite-vms (Windows VM layer, M4-1)
+
+1×DC (Windows Server 2019 eval) + 1×workstation (Windows 10 eval): forest `hesper.lab`,
+vulnerable-AD misconfig injection, Sysmon (sysmon-modular config), domain-joined workstation.
+VM↔VM on host-only `192.168.56.0/24`; VM→detection plane via VBox NAT `10.0.2.2:18000`
+(host loopback → WSL mirrored → Velociraptor frontend; see tv-networking.md §3).
+
+```bash
+# one-time host deps (Windows host; Sysmon fetched live per its EULA, nothing binary in-repo):
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-litevms-deps.ps1
+
+cd lab/vagrant/lite-vms
+vagrant up      # first run pulls ~10GB of eval boxes (180-day expiry)
+vagrant halt / vagrant destroy -f
+```
+
+Boxes: `StefanScherer/windows_2019` (pinned `2021.05.15`, same as GOAD-Light) +
+`StefanScherer/windows_10`. Provisioners are the plain `shell` provisioner — vagrant
+2.4.9 runs `.ps1` via PowerShell automatically on WinRM guests (no separate
+"powershell" provisioner exists in that version).
+
+## full (AD lateral chain) — later
 
 GOAD-Light VM layer + wizard for the manual Windows-eval-ISO step (license forbids
 redistribution). Preflight (`hesper lab preflight`) gates M4; see
@@ -52,7 +73,8 @@ redistribution). Preflight (`hesper lab preflight`) gates M4; see
 
 ## Hard constraints (honest limits)
 
-- Containers bootstrap automatically; the **AD VM layer needs Vagrant/VirtualBox and a
-  manual Windows-ISO download** — the installer is a wizard, not a one-shot script.
+- Containers bootstrap automatically; the VM layer uses eval boxes from Vagrant Cloud
+  (no manual ISO step for lite-vms/full — a manual Windows-ISO download only applies
+  if self-building custom images later).
 - On hosts crowded with other compose projects: lite pins subnet `172.16.0.0/16`
   (the usual 172.17+ pools are taken); zero-vm runs with `network_mode: none`.

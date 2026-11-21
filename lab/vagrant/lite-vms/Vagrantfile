@@ -1,0 +1,63 @@
+# -*- mode: ruby -*-
+# Hesper lite-vms profile (plan.md M4-1): 1 DC (Windows Server 2019 eval) +
+# 1 workstation (Windows 10 eval). StefanScherer eval boxes (Microsoft eval
+# license, 180-day expiry; same box family GOAD-Light uses). Windows-host
+# VirtualBox provider, WinRM communicator.
+#
+# Layout: NAT (default, for egress + 10.0.2.2 host-loopback path to WSL)
+#         + host-only 192.168.56.0/24 for VM<->VM / domain traffic.
+# Provision deps are uploaded from HESPER_PROVISION_FILES (host-side fetcher
+# scripts/fetch-litevms-deps.ps1) — no binaries live in this repo.
+
+Vagrant.configure("2") do |config|
+  files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
+
+  config.vm.communicator = :winrm
+  # Windows eval boots are slow under VBox-on-Hyper-V (nested mode); GOAD uses
+  # long boot timeouts for the same reason.
+  config.vm.boot_timeout = 1800
+  config.winrm.username = "vagrant"
+  config.winrm.password = "vagrant"
+  config.winrm.timeout = 1200
+  config.winrm.basic_auth_only = true
+  config.winrm.transport = :plaintext
+  config.winrm.max_tries = 30
+
+  # ---- DC01: forest root + vulnerable-AD + Sysmon ----
+  config.vm.define "dc" do |dc|
+    dc.vm.box = "StefanScherer/windows_2019"
+    dc.vm.box_version = "2021.05.15"
+    dc.vm.hostname = "DC01"
+    dc.vm.network "private_network", ip: "192.168.56.10", netmask: "255.255.255.0"
+    dc.vm.provider "virtualbox" do |vb|
+      vb.name = "hesper-litevms-dc01"
+      vb.memory = 3072
+      vb.cpus = 2
+      vb.gui = false
+      vb.linked_clone = true
+    end
+    dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
+    dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", reboot: true
+    dc.vm.provision "shell", path: "provision/20-dc-vulnad.ps1", reboot: true
+    dc.vm.provision "shell", path: "provision/30-sysmon.ps1"
+    dc.vm.provision "shell", path: "provision/40-network-check.ps1"
+  end
+
+  # ---- WKST01: domain workstation + Sysmon ----
+  config.vm.define "wkst" do |w|
+    w.vm.box = "StefanScherer/windows_10"
+    w.vm.hostname = "WKST01"
+    w.vm.network "private_network", ip: "192.168.56.20", netmask: "255.255.255.0"
+    w.vm.provider "virtualbox" do |vb|
+      vb.name = "hesper-litevms-wkst01"
+      vb.memory = 2560
+      vb.cpus = 2
+      vb.gui = false
+      vb.linked_clone = true
+    end
+    w.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
+    w.vm.provision "shell", path: "provision/10-wkst-join.ps1", reboot: true
+    w.vm.provision "shell", path: "provision/30-sysmon.ps1"
+    w.vm.provision "shell", path: "provision/40-network-check.ps1"
+  end
+end

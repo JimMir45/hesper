@@ -29,7 +29,9 @@
 
 ```
 Windows VM (Vagrant/VBox, NAT)                     WSL2 (mirrored)
-  velociraptor client agent ──► 10.0.2.2:8000 ──► Windows loopback ──► mirrored ──► hesper-velociraptor:8000
+  velociraptor client agent ──► 10.0.2.2:18000 ──► Windows loopback ──► mirrored ──► hesper-velociraptor:8000
+                                                    (host-side 18000: bare 8000 collides with other
+                                                     dev services on this shared machine — M2 finding)
 ```
 
 - `10.0.2.2` (VBox NAT gateway) maps to the **Windows host loopback**, and Windows-loopback → WSL is the verified path (table §2). No firewall changes needed; NAT guest→host egress is allowed by default.
