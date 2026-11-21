@@ -29,6 +29,21 @@ docker compose -f lab/compose.zero-vm.yaml up --abort-on-container-exit
 
 No attack execution, no Windows, no network — pure log parsing over public sample EVTX.
 
+## preflight (VM readiness gate, M4-0)
+
+`hesper lab preflight [--json]` observes — never installs — whether this machine
+can run the Windows-VM layer:
+
+- **CPU**: vendor + virtualization flag + `/dev/kvm`. Intel with KVM ⇒ `wsl2-kvm`
+  path; AMD (or no KVM) ⇒ `windows-host` Vagrant/VirtualBox path (design §9).
+- **Tools**: Vagrant/VirtualBox presence on both the WSL side and the Windows
+  host (via powershell interop + default install paths).
+- **Resources**: WSL + host RAM and `lab/state` disk against profile budgets
+  (lite-vms ≈10 GB RAM / 60 GB disk; full ≈24 GB / 120 GB, from the
+  [lab composition research](../docs/research/lab-defense-stack-selection-20261120.md)).
+
+Exit 0 = ready (no gaps); exit 1 = gaps listed. Run it before any M4 spend.
+
 ## full (AD lateral chain) — lands with M4
 
 GOAD-Light VM layer + wizard for the manual Windows-eval-ISO step (license forbids

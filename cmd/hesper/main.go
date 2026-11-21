@@ -83,7 +83,7 @@ Usage:
                           [--lab-profile lite] [--resume <run-dir>]      run the engine
   hesper validate --scope <file> --scripted <plan.json>                 M2 deterministic driver
   hesper pentest  --scope <file>           start a pentest run
-  hesper lab <up|down|status> [--profile]  manage the bundled lab
+  hesper lab <up|down|status|preflight> [--profile]  manage the bundled lab / VM readiness gate
   hesper stop --run <run-dir>              request a graceful stop (STOP file)
   hesper evidence verify <run-dir>         verify the evidence hash chain
   hesper report <show|render>              inspect run output (M3+)
@@ -138,21 +138,22 @@ func cmdEvidence(args []string) int {
 	return exitOK
 }
 
-// cmdLab implements `hesper lab up|down|status --profile <p>` (design §5.7).
+// cmdLab implements `hesper lab up|down|status|preflight` (design §5.7, M4-0 gate).
 func cmdLab(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status> [--profile <p>] [--lab-root <dir>]")
+		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status|preflight> [--profile <p>] [--lab-root <dir>]")
 		return exitUsageOrContract
 	}
 	verb := args[0]
 	fs := flag.NewFlagSet("lab "+verb, flag.ContinueOnError)
 	profile := fs.String("profile", "lite", "lab profile: lite | zero-vm")
 	labRoot := fs.String("lab-root", "lab", "directory containing compose files")
+	asJSON := fs.Bool("json", false, "preflight only: emit the report as JSON")
 	if err := fs.Parse(args[1:]); err != nil {
 		return exitUsageOrContract
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status> [--profile <p>] [--lab-root <dir>]")
+		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status|preflight> [--profile <p>] [--lab-root <dir>]")
 		return exitUsageOrContract
 	}
 	o := lab.New(*labRoot)
@@ -183,8 +184,26 @@ func cmdLab(args []string) int {
 		}
 		printHealth(h)
 		return healthExit(h)
+	case "preflight":
+		// M4-0 gate: observe VM-layer readiness; never installs anything.
+		// Gaps ⇒ exit 1 (same semantics as an unhealthy lab).
+		r := lab.NewPreflight(*labRoot).Run()
+		if *asJSON {
+			b, err := json.MarshalIndent(r, "", "  ")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "preflight:", err)
+				return exitOperational
+			}
+			fmt.Println(string(b))
+		} else {
+			fmt.Print(r.Human())
+		}
+		if !r.Ready {
+			return exitOperational
+		}
+		return exitOK
 	default:
-		fmt.Fprintf(os.Stderr, "hesper lab: unknown verb %q (want up|down|status)\n", verb)
+		fmt.Fprintf(os.Stderr, "hesper lab: unknown verb %q (want up|down|status|preflight)\n", verb)
 		return exitUsageOrContract
 	}
 }
