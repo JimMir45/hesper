@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,10 +20,13 @@ import (
 	"github.com/JimMir45/hesper/internal/adapters"
 	"github.com/JimMir45/hesper/internal/adapters/proc"
 	"github.com/JimMir45/hesper/internal/config"
+	"github.com/JimMir45/hesper/internal/engine"
 	"github.com/JimMir45/hesper/internal/evidence"
 	"github.com/JimMir45/hesper/internal/findings"
 	"github.com/JimMir45/hesper/internal/kernel"
 	"github.com/JimMir45/hesper/internal/lab"
+	"github.com/JimMir45/hesper/internal/planner"
+	plannerclient "github.com/JimMir45/hesper/internal/planner/client"
 	"github.com/JimMir45/hesper/internal/report"
 )
 
@@ -58,6 +62,8 @@ func run(args []string) int {
 		return cmdLab(args[1:])
 	case "evidence":
 		return cmdEvidence(args[1:])
+	case "stop":
+		return cmdStop(args[1:])
 	case "report", "mcp":
 		fmt.Fprintf(os.Stderr, "hesper %s: not implemented yet (see docs/plan.md)\n", args[0])
 		return exitUsageOrContract
@@ -73,10 +79,12 @@ func usage() {
 Usage:
   hesper scope check <scope.json>          validate a scope manifest
   hesper cards lint <dir>                  lint a directory of action cards
-  hesper validate --scope <file> [--scripted <plan.json> --lab-profile lite]
-                                           start a validation run
-  hesper pentest  --scope <file>           start a pentest run (engine: M5)
+  hesper validate --scope <file> [--planner stub --stub-plan <plan.json>]
+                          [--lab-profile lite] [--resume <run-dir>]      run the engine
+  hesper validate --scope <file> --scripted <plan.json>                 M2 deterministic driver
+  hesper pentest  --scope <file>           start a pentest run
   hesper lab <up|down|status> [--profile]  manage the bundled lab
+  hesper stop --run <run-dir>              request a graceful stop (STOP file)
   hesper evidence verify <run-dir>         verify the evidence hash chain
   hesper report <show|render>              inspect run output (M3+)
   hesper mcp                               serve MCP tools (M5)
@@ -208,42 +216,67 @@ func cmdRun(mode kernel.Mode, args []string) int {
 	configPath := fs.String("config", "", "path to run.config (optional; defaults apply)")
 	runDir := fs.String("run-dir", "", "run directory (default: runs/<UTC timestamp>)")
 	scripted := fs.String("scripted", "", "deterministic plan.json (no LLM) — M2 driver")
+	plannerKind := fs.String("planner", "", "planner: stub | model (default: model when run.config.model is set)")
+	stubPlan := fs.String("stub-plan", "", "plan.json driving --planner stub (reuses the M2 plan format)")
+	resumeDir := fs.String("resume", "", "resume the run in this run directory")
 	labProfile := fs.String("lab-profile", "", "require this lab profile healthy at INIT")
 	labRoot := fs.String("lab-root", "lab", "directory containing compose files")
 	actionsRoot := fs.String("actions-root", "actions", "directory containing action cards")
 	if err := fs.Parse(args); err != nil {
 		return exitUsageOrContract
 	}
-	if *scopePath == "" {
-		fmt.Fprintf(os.Stderr, "%s: --scope is required\n", mode)
-		return exitUsageOrContract
-	}
 
-	// Contract loading — ScopeMissing/Parse/Invalid and ConfigInvalid exit 2
-	// (design §6), before any state on disk is touched (fail-closed).
-	scope, err := kernel.LoadScope(*scopePath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return exitUsageOrContract
-	}
+	var scope *kernel.ScopeManifest
 	var cfg *config.RunConfig
-	if *configPath != "" {
-		cfg, err = config.LoadRunConfig(*configPath)
-	} else {
-		cfg = config.DefaultRunConfig()
-		err = cfg.Validate()
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return exitUsageOrContract
-	}
-	if scope.Mode != mode {
-		fmt.Fprintf(os.Stderr, "scope mode is %q; cannot start a %s run with it\n", scope.Mode, mode)
-		return exitUsageOrContract
-	}
+	var err error
 
-	if *runDir == "" {
-		*runDir = filepath.Join("runs", time.Now().UTC().Format("20060102T150405Z"))
+	if *resumeDir != "" {
+		// Resume: the run directory IS the contract source — its snapshots
+		// were frozen at INIT and must not be silently replaced.
+		scope, err = kernel.LoadScope(filepath.Join(*resumeDir, "scope.snapshot.json"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "resume:", err)
+			return exitUsageOrContract
+		}
+		cfg, err = config.LoadRunConfig(filepath.Join(*resumeDir, "run.config.json"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "resume:", err)
+			return exitUsageOrContract
+		}
+		if scope.Mode != mode {
+			fmt.Fprintf(os.Stderr, "resume: scope mode is %q; cannot resume as %s\n", scope.Mode, mode)
+			return exitUsageOrContract
+		}
+		*runDir = *resumeDir
+	} else {
+		if *scopePath == "" {
+			fmt.Fprintf(os.Stderr, "%s: --scope is required\n", mode)
+			return exitUsageOrContract
+		}
+		// Contract loading — ScopeMissing/Parse/Invalid and ConfigInvalid
+		// exit 2 (design §6), before any state on disk is touched.
+		scope, err = kernel.LoadScope(*scopePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitUsageOrContract
+		}
+		if *configPath != "" {
+			cfg, err = config.LoadRunConfig(*configPath)
+		} else {
+			cfg = config.DefaultRunConfig()
+			err = cfg.Validate()
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitUsageOrContract
+		}
+		if scope.Mode != mode {
+			fmt.Fprintf(os.Stderr, "scope mode is %q; cannot start a %s run with it\n", scope.Mode, mode)
+			return exitUsageOrContract
+		}
+		if *runDir == "" {
+			*runDir = filepath.Join("runs", time.Now().UTC().Format("20060102T150405Z"))
+		}
 	}
 
 	// INIT gate: a declared lab profile must be healthy before anything is
@@ -260,24 +293,236 @@ func cmdRun(mode kernel.Mode, args []string) int {
 		fmt.Printf("lab profile %q healthy\n", *labProfile)
 	}
 
-	audit, err := startRun(mode, scope, cfg, *configPath, *runDir)
+	var audit *kernel.AuditLog
+	if *resumeDir != "" {
+		// Resume: never rewrite the frozen snapshots; just reopen the audit.
+		audit, err = kernel.OpenAudit(filepath.Join(*runDir, "audit.jsonl"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitOperational
+		}
+	} else {
+		audit, err = startRun(mode, scope, cfg, *configPath, *runDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitOperational
+		}
+	}
+	defer audit.Close()
+
+	if *scripted != "" {
+		return runScripted(scriptedRunInput{
+			mode: mode, scope: scope, cfg: cfg, audit: audit,
+			planPath: *scripted, runDir: *runDir,
+			actionsRoot: *actionsRoot,
+		})
+	}
+	return runEngine(engineInput{
+		mode: mode, scope: scope, cfg: cfg, audit: audit,
+		runDir: *runDir, actionsRoot: *actionsRoot,
+		plannerKind: *plannerKind, stubPlan: *stubPlan, resume: *resumeDir != "",
+	})
+}
+
+// ---- M3: the ENGAGE engine loop (design §3/§5.6) ----
+
+type engineInput struct {
+	mode        kernel.Mode
+	scope       *kernel.ScopeManifest
+	cfg         *config.RunConfig
+	audit       *kernel.AuditLog
+	runDir      string
+	actionsRoot string
+	plannerKind string
+	stubPlan    string
+	resume      bool
+}
+
+func runEngine(in engineInput) int {
+	registry, err := actions.LoadRegistry(in.actionsRoot)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "registry:", err)
+		return exitUsageOrContract
+	}
+	fmt.Printf("registry: %d card(s) loaded from %s\n", registry.Count(), in.actionsRoot)
+
+	kind := in.plannerKind
+	if kind == "" {
+		if in.cfg.Model != nil {
+			kind = "model"
+		} else {
+			fmt.Fprintln(os.Stderr, "planner: run.config has no model configured; pass --planner stub --stub-plan <plan.json> or configure run.config model")
+			return exitUsageOrContract
+		}
+	}
+
+	var p planner.Planner
+	switch kind {
+	case "stub":
+		if in.stubPlan == "" {
+			fmt.Fprintln(os.Stderr, "planner: --planner stub requires --stub-plan <plan.json>")
+			return exitUsageOrContract
+		}
+		plan, err := loadPlan(in.stubPlan)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "stub plan:", err)
+			return exitUsageOrContract
+		}
+		p = &planner.Stub{Turns: planToTurns(plan)}
+		fmt.Printf("planner: stub (%d turns from %s)\n", len(plan.Steps), in.stubPlan)
+	case "model":
+		if in.cfg.Model == nil {
+			fmt.Fprintln(os.Stderr, "planner: --planner model requires run.config model")
+			return exitUsageOrContract
+		}
+		temp := 0.0
+		if in.cfg.Planner.Temperature != nil {
+			temp = *in.cfg.Planner.Temperature
+		}
+		p = plannerclient.NewModelPlanner(plannerclient.New(*in.cfg.Model, temp, 4096), in.cfg.Planner.MaxProposalsPerTurn)
+		fmt.Printf("planner: model %s (%s, key env %s)\n", in.cfg.Model.Model, in.cfg.Model.Provider, in.cfg.Model.APIKeyEnv)
+	default:
+		fmt.Fprintf(os.Stderr, "planner: unknown kind %q (stub | model)\n", kind)
+		return exitUsageOrContract
+	}
+
+	runDirAbs, err := filepath.Abs(in.runDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitOperational
 	}
-	defer audit.Close()
-
-	if *scripted == "" {
-		fmt.Printf("run initialized: %s\n  mode=%s  scope=%s  targets=%d  budget=%d actions / %d min\n  judge=%s (window %ds)\n  no --scripted plan given: engine loop lands in M3\n",
-			*runDir, scope.Mode, scope.Name, len(scope.Targets), scope.Budget.MaxActions, scope.Budget.MaxMinutes,
-			cfg.Judge.Mode, cfg.Judge.CorrelationWindowS)
-		return exitOK
+	chain, err := evidence.OpenChain(runDirAbs)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitOperational
 	}
-	return runScripted(scriptedRunInput{
-		mode: mode, scope: scope, cfg: cfg, audit: audit,
-		planPath: *scripted, runDir: *runDir,
-		actionsRoot: *actionsRoot,
+
+	// Budget: a resume inherits the ORIGINAL accounting — never mints.
+	// A run stopped at turn 0 never persisted a deadline; that resume gets a
+	// fresh time window (action accounting is still inherited).
+	var budgeter *kernel.Budgeter
+	if in.resume {
+		used, deadline, err := loadBudgetState(runDirAbs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "resume:", err)
+			return exitUsageOrContract
+		}
+		if deadline.IsZero() {
+			budgeter = kernel.NewBudgeter(in.scope.Budget)
+			fmt.Printf("resume: budget deadline unknown (stopped at turn 0) — fresh time window, %d actions already used\n", used)
+		} else {
+			budgeter = kernel.RestoreBudgeter(in.scope.Budget, used, deadline, time.Now)
+			fmt.Printf("resume: budget restored (%d actions used, deadline %s)\n", used, deadline.Format(time.RFC3339))
+		}
+	} else {
+		budgeter = kernel.NewBudgeter(in.scope.Budget)
+	}
+
+	// Kill switch: first SIGINT drains (STOPPED); second escalates (ABORTED).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	abort := make(chan struct{})
+	sig := make(chan os.Signal, 2)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+	go func() {
+		<-sig
+		cancel()
+		<-sig
+		close(abort)
+	}()
+
+	res, err := engine.Run(ctx, engine.Options{
+		RunDir: in.runDir, RunID: filepath.Base(in.runDir),
+		Scope: in.scope, Cfg: in.cfg, Registry: registry,
+		Adapters: map[string]adapters.Adapter{"proc": proc.New()},
+		Planner:  p, Audit: in.audit, Chain: chain, Budget: budgeter,
+		ForceAbort: abort,
 	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitOperational
+	}
+	prov, disp, gap := 0, 0, 0
+	for _, f := range res.Findings {
+		switch f.Status {
+		case findings.StatusProven:
+			prov++
+		case findings.StatusDisproven:
+			disp++
+		case findings.StatusDetectionGap:
+			gap++
+		}
+	}
+	fmt.Printf("run %s: %s\n  turns=%d executed=%d findings=%d (proven=%d disproven=%d detection_gap=%d)\n  outputs: findings.json report.md evidence/chain.jsonl\n",
+		res.Terminal, in.runDir, res.Turns, res.Executed, len(res.Findings), prov, disp, gap)
+	if res.ExitCode == engine.ExitKill {
+		fmt.Fprintln(os.Stderr, "hesper: stopped by kill switch (exit 130)")
+	}
+	return res.ExitCode
+}
+
+// loadBudgetState reads the persisted budget accounting for a resume. An
+// empty deadline (a run stopped at turn 0 persists none) is unknown, not an
+// error — the caller grants a fresh time window in that case.
+func loadBudgetState(runDir string) (int, time.Time, error) {
+	b, err := os.ReadFile(filepath.Join(runDir, "state", "state.json"))
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("state: %w", err)
+	}
+	var st struct {
+		BudgetUsed int    `json:"budget_used"`
+		Deadline   string `json:"budget_deadline"`
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return 0, time.Time{}, fmt.Errorf("state parse: %w", err)
+	}
+	if st.Deadline == "" {
+		return st.BudgetUsed, time.Time{}, nil
+	}
+	deadline, err := time.Parse(time.RFC3339, st.Deadline)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("state deadline: %w", err)
+	}
+	return st.BudgetUsed, deadline, nil
+}
+
+// planToTurns maps an M2 plan to stub turns: one step per turn, exercising
+// the full observe→propose→…→update cycle per action.
+func planToTurns(plan scriptedPlan) [][]planner.Proposal {
+	turns := make([][]planner.Proposal, 0, len(plan.Steps))
+	for _, s := range plan.Steps {
+		turns = append(turns, []planner.Proposal{{
+			CardID: s.CardID, Class: s.Class, Params: s.Params, Target: s.Target,
+			Assertion: s.Assertion, Repro: s.Repro,
+		}})
+	}
+	return turns
+}
+
+// cmdStop implements `hesper stop --run <dir>`: writes the STOP file the
+// engine polls between iterations (design §5.1 kill switch).
+func cmdStop(args []string) int {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	run := fs.String("run", "", "run directory (required)")
+	if err := fs.Parse(args); err != nil {
+		return exitUsageOrContract
+	}
+	if *run == "" {
+		fmt.Fprintln(os.Stderr, "usage: hesper stop --run <run-dir>")
+		return exitUsageOrContract
+	}
+	dir := filepath.Join(*run, "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitOperational
+	}
+	if err := os.WriteFile(filepath.Join(dir, "STOP"), []byte("stop\n"), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitOperational
+	}
+	fmt.Printf("stop requested: %s (engine drains its in-flight action, then STOPPED)\n", *run)
+	return exitOK
 }
 
 // startRun creates the run directory and its INIT artifacts (audit, scope
@@ -341,6 +586,26 @@ type scriptedRunInput struct {
 	actionsRoot string
 }
 
+// loadPlan parses and contract-checks an M2 plan.json (shared by the
+// scripted driver and the stub planner source).
+func loadPlan(path string) (scriptedPlan, error) {
+	var plan scriptedPlan
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return plan, err
+	}
+	if err := json.Unmarshal(b, &plan); err != nil {
+		return plan, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if !strings.HasPrefix(plan.Version, "0.") {
+		return plan, fmt.Errorf("unsupported major version %q", plan.Version)
+	}
+	if len(plan.Steps) == 0 {
+		return plan, fmt.Errorf("no steps")
+	}
+	return plan, nil
+}
+
 func runScripted(in scriptedRunInput) int {
 	runDirAbs, err := filepath.Abs(in.runDir)
 	if err != nil {
@@ -358,22 +623,9 @@ func runScripted(in scriptedRunInput) int {
 	fmt.Printf("registry: %d card(s) loaded from %s\n", registry.Count(), in.actionsRoot)
 
 	// Plan: parse + contract-check.
-	b, err := os.ReadFile(in.planPath)
+	plan, err := loadPlan(in.planPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plan:", err)
-		return exitUsageOrContract
-	}
-	var plan scriptedPlan
-	if err := json.Unmarshal(b, &plan); err != nil {
-		fmt.Fprintln(os.Stderr, "plan: parse:", err)
-		return exitUsageOrContract
-	}
-	if !strings.HasPrefix(plan.Version, "0.") {
-		fmt.Fprintf(os.Stderr, "plan: unsupported major version %q\n", plan.Version)
-		return exitUsageOrContract
-	}
-	if len(plan.Steps) == 0 {
-		fmt.Fprintln(os.Stderr, "plan: no steps")
 		return exitUsageOrContract
 	}
 

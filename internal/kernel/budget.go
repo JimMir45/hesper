@@ -58,3 +58,22 @@ func (b *Budgeter) Exhausted() (bool, string) {
 	}
 	return false, ""
 }
+
+// Dump returns the budgeter's accounting (used actions, deadline) for
+// run-state persistence (design §3 resume path).
+func (b *Budgeter) Dump() (used int, deadline time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.used, b.deadline
+}
+
+// RestoreBudgeter rebuilds a budgeter with prior accounting, so a resumed
+// run continues under the ORIGINAL limits — a resume never mints budget.
+func RestoreBudgeter(b Budget, used int, deadline time.Time, clock func() time.Time) *Budgeter {
+	return &Budgeter{
+		maxActions: b.MaxActions,
+		deadline:   deadline,
+		used:       used,
+		clock:      clock,
+	}
+}
