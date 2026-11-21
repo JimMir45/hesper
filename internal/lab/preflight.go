@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Preflight implements the M4-0 gate (plan.md): detect whether this machine
@@ -204,14 +203,7 @@ func meminfoGB() (totalGB, availGB float64) {
 }
 
 func diskAvailGB(path string) (float64, bool) {
-	if path == "" {
-		path = "."
-	}
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, false
-	}
-	return float64(st.Bavail*uint64(st.Bsize)) / (1 << 30), true
+	return diskFreeGB(path)
 }
 
 // Run executes all probes and derives the verdict. Fail-soft: unknown
