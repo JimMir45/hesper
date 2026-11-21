@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/JimMir45/hesper/internal/config"
 	"github.com/JimMir45/hesper/internal/kernel"
+	"github.com/JimMir45/hesper/internal/lab"
 )
 
 const version = "0.0.1-dev"
@@ -42,7 +44,9 @@ func run(args []string) int {
 		return cmdRun(kernel.ModeValidate, args[1:])
 	case "pentest":
 		return cmdRun(kernel.ModePentest, args[1:])
-	case "lab", "report", "evidence", "mcp":
+	case "lab":
+		return cmdLab(args[1:])
+	case "report", "evidence", "mcp":
 		fmt.Fprintf(os.Stderr, "hesper %s: not implemented yet (see docs/plan.md)\n", args[0])
 		return exitUsageOrContract
 	default:
@@ -58,7 +62,7 @@ Usage:
   hesper scope check <scope.json>     validate a scope manifest
   hesper validate --scope <file>      start a validation run (engine: M2+)
   hesper pentest  --scope <file>      start a pentest run (engine: M5)
-  hesper lab <up|down|status>         manage the bundled lab (M1)
+  hesper lab <up|down|status>         manage the bundled lab
   hesper report <show|render>         inspect run output (M2+)
   hesper evidence verify <run-dir>    verify the evidence hash chain (M2+)
   hesper mcp                          serve MCP tools (M5)
@@ -80,6 +84,79 @@ func cmdScope(args []string) int {
 		m.Name, m.Mode, len(m.Targets), m.Budget.MaxActions, m.Budget.MaxMinutes,
 		m.Allow.Classes, m.Allow.Adapters, m.Deny)
 	return exitOK
+}
+
+// cmdLab implements `hesper lab up|down|status --profile <p>` (design §5.7).
+// LabUnhealthy exits 1 (design §6); unknown profile / usage exits 2.
+func cmdLab(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status> [--profile <p>] [--lab-root <dir>]")
+		return exitUsageOrContract
+	}
+	verb := args[0]
+	fs := flag.NewFlagSet("lab "+verb, flag.ContinueOnError)
+	profile := fs.String("profile", "lite", "lab profile: lite | zero-vm")
+	labRoot := fs.String("lab-root", "lab", "directory containing compose files")
+	if err := fs.Parse(args[1:]); err != nil {
+		return exitUsageOrContract
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: hesper lab <up|down|status> [--profile <p>] [--lab-root <dir>]")
+		return exitUsageOrContract
+	}
+	o := lab.New(*labRoot)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	switch verb {
+	case "up":
+		h, err := o.Up(ctx, *profile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitOperational
+		}
+		printHealth(h)
+		return healthExit(h)
+	case "down":
+		if err := o.Down(ctx, *profile); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitOperational
+		}
+		fmt.Printf("lab %s: down\n", *profile)
+		return exitOK
+	case "status":
+		h, err := o.Status(ctx, *profile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitOperational
+		}
+		printHealth(h)
+		return healthExit(h)
+	default:
+		fmt.Fprintf(os.Stderr, "hesper lab: unknown verb %q (want up|down|status)\n", verb)
+		return exitUsageOrContract
+	}
+}
+
+func printHealth(h lab.Health) {
+	fmt.Printf("lab %s: healthy=%v\n", h.Profile, h.Healthy)
+	for _, s := range h.Services {
+		health := s.Health
+		if health == "" {
+			health = "n/a"
+		}
+		fmt.Printf("  %-24s state=%-10s health=%s\n", s.Name, s.State, health)
+	}
+	if h.Detail != "" {
+		fmt.Printf("  detail: %s\n", h.Detail)
+	}
+}
+
+func healthExit(h lab.Health) int {
+	if h.Healthy {
+		return exitOK
+	}
+	return exitOperational
 }
 
 func cmdRun(mode kernel.Mode, args []string) int {

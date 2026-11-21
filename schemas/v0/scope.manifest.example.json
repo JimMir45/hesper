@@ -3,7 +3,7 @@
   "mode": "validate",
   "name": "lab-lite-demo",
   "targets": [
-    { "kind": "cidr", "value": "172.20.0.0/16", "comment": "hesper lab docker network" },
+    { "kind": "cidr", "value": "172.16.0.0/16", "comment": "hesper lab docker network" },
     { "kind": "host", "value": "localhost", "comment": "host-bound lab ports" }
   ],
   "allow": {

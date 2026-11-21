@@ -1,0 +1,103 @@
+name: hesper-lab-lite
+
+# Lite lab profile (docs/research/lab-defense-stack-selection-20261120.md):
+# VAmPI (insecure API, host :5002) + DVWA (web, host :4280, with its mariadb)
+# + Velociraptor server (GUI host :8889, frontend :8000 for future VM agents).
+#
+# State lives under lab/state/ (git-ignored). Override the location with
+# HESPER_LAB_STATE if the engine's repo lives on a drvfs mount (see
+# docs/research/tv-networking.md).
+
+networks:
+  lab-net:
+    driver: bridge
+    ipam:
+      config:
+        # 172.16.0.0/16 is the only free 172.x /16 on shared dev machines
+        # (172.17-172.31 are commonly taken; see docs/research/tv-networking.md).
+        - subnet: 172.16.0.0/16
+
+services:
+  vampi:
+    image: erev0s/vampi:latest
+    container_name: hesper-vampi
+    environment:
+      - vulnerable=1
+    ports:
+      - "127.0.0.1:5002:5000"
+    networks:
+      - lab-net
+    healthcheck:
+      # image has no curl/wget; python 3.11 is present
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  db:
+    image: docker.io/library/mariadb:10
+    container_name: hesper-dvwa-db
+    environment:
+      MYSQL_ROOT_PASSWORD: dvwa
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    volumes:
+      - ${HESPER_LAB_STATE:-./state}/dvwa-db:/var/lib/mysql
+    networks:
+      - lab-net
+    healthcheck:
+      # NOT the image default healthcheck.sh: it writes a credentials cnf
+      # into the datadir, and mariadb ignores world-writable cnf files —
+      # on drvfs (/mnt/c) every file is 0777, so the default check can
+      # never authenticate. Ping with the root password from the env.
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    container_name: hesper-dvwa
+    environment:
+      DB_SERVER: db
+    ports:
+      - "127.0.0.1:4280:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - lab-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1/login.php -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  velociraptor:
+    image: ghcr.io/velocidex/velociraptor-server:latest
+    container_name: hesper-velociraptor
+    environment:
+      - VELOCIRAPTOR_NO_INITIALIZE=TRUE
+      - VELOCIRAPTOR_INITIAL_ADMIN_PASSWORD=hesper-lab
+    ports:
+      # frontend published on all interfaces: the future Windows VM agent
+      # (M4) reaches it via the WSL IP. NAT'd WSL ports are not reachable
+      # from the internet (see tv-networking.md). GUI stays on loopback.
+      - "8000:8000"
+      - "127.0.0.1:8889:8889"
+    volumes:
+      - ${HESPER_LAB_STATE:-./state}/velociraptor/etc:/etc/velociraptor
+      - ${HESPER_LAB_STATE:-./state}/velociraptor/datastore:/datastore
+    networks:
+      - lab-net
+    healthcheck:
+      # image is busybox-based: no curl/wget binary, but busybox applets exist
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8889"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s

@@ -1,0 +1,35 @@
+name: hesper-lab-zero-vm
+
+# Zero-VM profile: offline detection-rule validation without any Windows
+# machine. Runs chainsaw (static musl binary fetched by
+# scripts/fetch-zero-vm-data.sh) over EVTX-ATTACK-SAMPLES against Sigma rules.
+# CI-friendly: no attack execution at all — only log parsing.
+
+# Prerequisites (one-time): bash scripts/fetch-zero-vm-data.sh
+# Run: docker compose -f lab/compose.zero-vm.yaml up --abort-on-container-exit
+# Results: lab/state/chainsaw-out/ (NDJSON)
+
+services:
+  chainsaw-hunt:
+    # debian, not alpine: chainsaw v2.18+ ships gnu builds only
+    image: debian:bookworm-slim
+    container_name: hesper-chainsaw-hunt
+    # offline scanner: no network needed; avoids docker address-pool
+    # exhaustion on hosts crowded with other compose projects
+    network_mode: none
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "== chainsaw hunt: EVTX-ATTACK-SAMPLES x Sigma =="
+        /data/bin/chainsaw hunt /data/samples \
+          -s /data/sigma/rules \
+          --mapping /data/mappings/sigma-event-logs-all.yml \
+          --json -o /data/out/findings.json
+        echo "== done; results in lab/state/chainsaw-out/ =="
+    volumes:
+      - ${HESPER_LAB_STATE:-./state}/bin:/data/bin:ro
+      - ${HESPER_LAB_STATE:-./state}/evtx-samples:/data/samples:ro
+      - ${HESPER_LAB_STATE:-./state}/sigma:/data/sigma:ro
+      - ${HESPER_LAB_STATE:-./state}/sigma-mappings:/data/mappings:ro
+      - ${HESPER_LAB_STATE:-./state}/chainsaw-out:/data/out

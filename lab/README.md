@@ -1,23 +1,43 @@
 # Bundled Lab
 
-The practice range ships in three profiles (resource budgets from
-[the composition research](../docs/research/lab-defense-stack-selection-20261120.md)):
+The practice range ships in three profiles (composition rationale:
+[docs/research/lab-defense-stack-selection-20261120.md](../docs/research/lab-defense-stack-selection-20261120.md),
+live networking validation: [docs/research/tv-networking.md](../docs/research/tv-networking.md)).
 
-| Profile | Contents | RAM (approx.) | Purpose |
-|---|---|---|---|
-| **lite** (default) | VAmPI + DVWA (web/API), Metasploitable 2 (Linux), mini AD (single DC + vulnerable-AD injection), offline detection chain (Sysmon → EVTX → chainsaw/hayabusa) | ~8–10 GB | First-run demo; 16 GB machines |
-| **full** | lite + juice-shop + GOAD-Light (3 VMs) + Velociraptor server for online Sigma judgment | ~24–27 GB | Full lateral chain; 32 GB machines |
-| **zero-vm** | EVTX-ATTACK-SAMPLES replay against detection rules | ~0 | CI and offline regression of detection rules |
+## Quick start (lite)
+
+```bash
+go build -o hesper ./cmd/hesper
+./hesper lab up --profile lite --lab-root lab     # images pulled on first run
+./hesper lab status --profile lite
+# DVWA        http://127.0.0.1:4280  (login.php)
+# VAmPI       http://127.0.0.1:5002  (insecure instance)
+# Velociraptor GUI  https://127.0.0.1:8889  (admin / hesper-lab)
+./hesper lab down --profile lite
+```
+
+State persists under `lab/state/` (git-ignored): velociraptor config + datastore,
+dvwa database. Relocate heavy state off drvfs with `HESPER_LAB_STATE=/some/ext4/path`.
+
+## zero-vm (offline detection-rule validation, CI-friendly)
+
+```bash
+bash scripts/fetch-zero-vm-data.sh     # one-time: chainsaw binary, Sigma rules, EVTX samples
+docker compose -f lab/compose.zero-vm.yaml up --abort-on-container-exit
+# results: lab/state/chainsaw-out/findings.json (NDJSON, ATT&CK-tagged)
+```
+
+No attack execution, no Windows, no network — pure log parsing over public sample EVTX.
+
+## full (AD lateral chain) — lands with M4
+
+GOAD-Light VM layer + wizard for the manual Windows-eval-ISO step (license forbids
+redistribution). Preflight (`hesper lab preflight`) gates M4; see
+[docs/research/tv-networking.md](../docs/research/tv-networking.md) §6 for the honest gaps.
 
 ## Hard constraints (honest limits)
 
-- Containers (web/API/detection) bootstrap fully automatically with `docker compose`.
-- The AD range must live at the VM layer (Vagrant + VirtualBox/VMware, or Proxmox + Ludus).
-- Windows evaluation ISOs must be downloaded manually by the user — Microsoft's license does
-  not permit redistribution. The installer therefore ships as a **wizard**, not a one-shot
-  script, and the README will say so.
-
-## Status
-
-Not yet implemented. Composition decisions live in the research doc; compose/Vagrant drafts
-land here next.
+- Containers bootstrap automatically; the **AD VM layer needs Vagrant/VirtualBox and a
+  manual Windows-ISO download** — the installer is a wizard, not a one-shot script.
+- On hosts crowded with other compose projects: lite pins subnet `172.16.0.0/16`
+  (the usual 172.17+ pools are taken); zero-vm runs with `network_mode: none`.
