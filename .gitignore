@@ -21,6 +21,9 @@ Thumbs.db
 /lab/**/*.vbox*
 /lab/**/*.vmware*
 
+# Run directories are portable evidence packages — artifacts, not source
+/runs/
+
 # Secrets / scope manifests with real targets
 *.local.yaml
 *.local.yml

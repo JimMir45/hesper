@@ -11,3 +11,12 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      # Action-card provenance gate (design §5.2): every checked-in card must
+      # carry its source triple, and the linter must still catch bad cards.
+      - name: action-card lint gate
+        run: |
+          go run ./cmd/hesper cards lint actions
+          if go run ./cmd/hesper cards lint internal/actions/testdata/bad; then
+            echo "::error::bad-card fixtures passed lint — the linter is broken"
+            exit 1
+          fi

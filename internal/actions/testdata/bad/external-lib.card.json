@@ -1,0 +1,14 @@
+{
+  "version": "0.1",
+  "id": "bad-external-lib",
+  "title": "Bad fixture: reuse=external bound to a lib executor",
+  "attack": { "technique_id": "T1003" },
+  "provenance": {
+    "source_repo": "https://github.com/fortra/impacket",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "license": "Apache-1.1"
+  },
+  "reuse": "external",
+  "executor": { "adapter": "lib", "argv": [] },
+  "evidence": { "must_capture": ["stdout"] }
+}

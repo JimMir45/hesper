@@ -87,7 +87,9 @@ services:
       # frontend published on all interfaces: the future Windows VM agent
       # (M4) reaches it via the WSL IP. NAT'd WSL ports are not reachable
       # from the internet (see tv-networking.md). GUI stays on loopback.
-      - "8000:8000"
+      # Host side is 18000: bare 8000 collides with other dev services on
+      # this shared machine (M2 finding; container side stays 8000).
+      - "18000:8000"
       - "127.0.0.1:8889:8889"
     volumes:
       - ${HESPER_LAB_STATE:-./state}/velociraptor/etc:/etc/velociraptor

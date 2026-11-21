@@ -1,0 +1,50 @@
+{
+  "version": "0.1",
+  "steps": [
+    {
+      "id": "step-1-dvwa-reachable",
+      "card_id": "web-dvwa-login-reachable",
+      "class": "web",
+      "target": "localhost",
+      "params": {
+        "url": "http://127.0.0.1:4280/login.php",
+        "out_file": "body.json"
+      },
+      "assertion": "DVWA login page is reachable on the bundled lab (recon prerequisite)",
+      "repro": [
+        "docker compose -f lab/compose.lite.yaml up -d --wait",
+        "curl -s http://127.0.0.1:4280/login.php | head -5"
+      ]
+    },
+    {
+      "id": "step-2-vampi-bola",
+      "card_id": "web-vampi-bola-probe",
+      "class": "web",
+      "target": "localhost",
+      "params": {
+        "url": "http://127.0.0.1:5002/users/v1/name1",
+        "out_file": "body.json"
+      },
+      "assertion": "VAmPI serves a seeded user's record (incl. password) without authentication (BOLA)",
+      "repro": [
+        "docker compose -f lab/compose.lite.yaml up -d --wait",
+        "curl -s http://127.0.0.1:5002/users/v1/name1"
+      ]
+    },
+    {
+      "id": "step-3-vampi-debug",
+      "card_id": "web-vampi-debug-exposure",
+      "class": "web",
+      "target": "localhost",
+      "params": {
+        "url": "http://127.0.0.1:5002/users/v1/_debug",
+        "out_file": "body.json"
+      },
+      "assertion": "VAmPI debug route lists the full user table (passwords included) without authentication",
+      "repro": [
+        "docker compose -f lab/compose.lite.yaml up -d --wait",
+        "curl -s http://127.0.0.1:5002/users/v1/_debug"
+      ]
+    }
+  ]
+}

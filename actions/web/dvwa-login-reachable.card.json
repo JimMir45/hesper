@@ -1,0 +1,30 @@
+{
+  "version": "0.1",
+  "id": "web-dvwa-login-reachable",
+  "title": "DVWA reachability: GET /login.php returns 200",
+  "attack": { "technique_id": "T1190", "tactic": "initial-access" },
+  "provenance": {
+    "source_repo": "https://github.com/JimMir45/hesper",
+    "commit": "bc6c99b",
+    "license": "Apache-2.0"
+  },
+  "reuse": "embedded",
+  "preconditions": {
+    "phase": "recon",
+    "ports": [4280],
+    "notes": "DVWA web entry on the bundled lab network"
+  },
+  "executor": {
+    "adapter": "proc",
+    "argv": [
+      "curl", "-s", "-S", "--max-time", "20",
+      "-o", "{params.out_file}",
+      "-w", "%{http_code}",
+      "{params.url}"
+    ],
+    "success_stdout_contains": "200"
+  },
+  "evidence": { "must_capture": ["stdout", "body"] },
+  "detection": { "expected_sigma": [] },
+  "risks": "read-only GET against the bundled lab; no state mutation"
+}

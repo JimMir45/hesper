@@ -1,0 +1,9 @@
+{
+  "version": "0.1",
+  "id": "bad-missing-provenance",
+  "title": "Bad fixture: provenance triple absent",
+  "attack": { "technique_id": "T1190" },
+  "reuse": "embedded",
+  "executor": { "adapter": "proc", "argv": ["true"] },
+  "evidence": { "must_capture": ["stdout"] }
+}

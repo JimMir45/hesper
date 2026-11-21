@@ -1,0 +1,28 @@
+{
+  "version": "0.1",
+  "id": "web-nuclei-template-scan",
+  "title": "Nuclei template scan against a web target (external engine)",
+  "attack": { "technique_id": "T1190", "tactic": "initial-access" },
+  "provenance": {
+    "source_repo": "https://github.com/projectdiscovery/nuclei-templates",
+    "commit": "fde6ccb4bce6cc1635dc561156d58274b997ee40",
+    "license": "MIT"
+  },
+  "reuse": "external",
+  "preconditions": {
+    "phase": "entry",
+    "notes": "nuclei engine invoked as an external process (license layer: external, never linked)"
+  },
+  "executor": {
+    "adapter": "proc",
+    "argv": [
+      "nuclei", "-silent",
+      "-t", "{params.template}",
+      "-target", "{params.url}",
+      "-o", "{params.out_file}"
+    ]
+  },
+  "evidence": { "must_capture": ["stdout", "body"] },
+  "detection": { "expected_sigma": [] },
+  "risks": "active scanning; scope-gated by the kernel; lint-only in M2 (engine run lands later)"
+}

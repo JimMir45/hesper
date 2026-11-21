@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -32,6 +34,15 @@ type Health struct {
 // combined output and an error. Injectable for tests.
 type Runner func(ctx context.Context, dir string, args ...string) (string, error)
 
+// WarmupStep is a post-Up initialization probe against a freshly started
+// lab service — provisioning belongs to the orchestrator, not to
+// engagements (e.g. VAmPI's /createdb must run before any user probe can
+// succeed; found live in M2).
+type WarmupStep struct {
+	Name string
+	URL  string
+}
+
 // ComposeOrchestrator drives `docker compose` per profile.
 type ComposeOrchestrator struct {
 	// LabRoot is the directory containing the compose files (default "lab").
@@ -40,6 +51,12 @@ type ComposeOrchestrator struct {
 	Profiles map[string]string
 	// Runner is the command runner (default: exec docker compose).
 	Runner Runner
+	// Warmups are post-Up initialization steps per profile. Nil skips
+	// warmup entirely (tests, profiles without provisioning needs).
+	Warmups map[string][]WarmupStep
+	// WarmupClient is injectable for tests; the default client bypasses
+	// ambient proxies explicitly (Transport.Proxy = nil).
+	WarmupClient *http.Client
 }
 
 const upTimeout = 15 * time.Minute
@@ -54,6 +71,20 @@ func New(labRoot string) *ComposeOrchestrator {
 			// "full" lands with M4 (GOAD-Light VM layer); refused until then.
 		},
 		Runner: dockerComposeRunner,
+		Warmups: map[string][]WarmupStep{
+			"lite": {
+				// VAmPI's SQLite schema exists only after /createdb; without
+				// it every user probe 500s ("no such table: users").
+				{Name: "vampi-createdb", URL: "http://127.0.0.1:5002/createdb"},
+				// DVWA first-deploy setup page (GET warms it; full table
+				// creation via the wizard stays manual for M4 VM labs).
+				{Name: "dvwa-setup-page", URL: "http://127.0.0.1:4280/setup.php"},
+			},
+		},
+		WarmupClient: &http.Client{
+			Transport: &http.Transport{Proxy: nil},
+			Timeout:   15 * time.Second,
+		},
 	}
 }
 
@@ -104,7 +135,56 @@ func (o *ComposeOrchestrator) Up(ctx context.Context, profile string) (Health, e
 	if !h.Healthy {
 		return h, fmt.Errorf("lab: profile %q did not come up healthy (%s)", profile, h.Detail)
 	}
+	if err := o.runWarmups(profile); err != nil {
+		h.Detail = strings.TrimSpace(h.Detail + "; warmup: " + err.Error())
+		return h, fmt.Errorf("lab: warmup failed: %w", err)
+	}
 	return h, nil
+}
+
+// runWarmups executes the profile's post-Up initialization probes with
+// retries. Provisioning failures fail the Up loudly — downstream engagements
+// would otherwise fail confusingly mid-run.
+func (o *ComposeOrchestrator) runWarmups(profile string) error {
+	steps := o.Warmups[profile]
+	if len(steps) == 0 {
+		return nil
+	}
+	client := o.WarmupClient
+	if client == nil {
+		client = &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 15 * time.Second}
+	}
+	for _, s := range steps {
+		var lastErr error
+		ok := false
+		for attempt := 0; attempt < 3 && !ok; attempt++ {
+			if attempt > 0 {
+				time.Sleep(2 * time.Second)
+			}
+			resp, err := client.Get(s.URL)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			drainAndClose(resp)
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				ok = true
+				continue
+			}
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		if !ok {
+			return fmt.Errorf("%s (%s): %w", s.Name, s.URL, lastErr)
+		}
+	}
+	return nil
+}
+
+func drainAndClose(resp *http.Response) {
+	if resp.Body != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
 }
 
 // Down tears the profile down. State under lab/state/ (bind-mount trees and
