@@ -1,0 +1,83 @@
+{
+  "version": "0.1",
+  "claims": [
+    {
+      "id": "C1-argv-injection-literal",
+      "claim": "Planner params with shell metacharacters arrive as literal argv elements — never through a shell",
+      "command": "go test ./internal/adapters/proc -run '^TestInjectionMetacharactersArriveAsLiteralArgv$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C2-evidence-missing-not-happened",
+      "claim": "An action missing any must_capture artifact counts as not happened and no finding may reference it",
+      "command": "go test ./internal/adapters/proc -run '^TestMissingMustCaptureMeansNotHappened$' && go test ./internal/adapters/proc -run '^TestDeniedActionsProduceNoFinding$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C3-egress-three-strikes-policy-stop",
+      "claim": "Three egress violations stop the run with exit 1 (policy stop, distinct from the kill switch's 130)",
+      "command": "go test ./internal/engine -run '^TestEgressThreeStrikesStopsRunWithExit1$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C4-sigma-author-fail-closed",
+      "claim": "A Sigma rule without an author is a hard error — DRL-1.1 attribution is enforced, not requested (both judge paths)",
+      "command": "go test ./internal/detection -run '^TestOfflineJudgeAttributionFailClosed$' && go test ./internal/detection -run '^TestVelociraptorJudgeAttributionFailClosed$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C5-gap-four-conditions",
+      "claim": "The detection_gap verdict fires only when all four formal conditions hold",
+      "command": "go test ./internal/findings -run '^TestGapFourConditions$' && go test ./internal/detection -run '^TestGapE2E'",
+      "tier": "ci"
+    },
+    {
+      "id": "C6-evidence-chain-tamper-evident",
+      "claim": "Tampering with a chained record or an artifact file makes `hesper evidence verify` fail",
+      "command": "go test ./internal/evidence -run '^TestChainVerifyFailsOnTampered'",
+      "tier": "ci"
+    },
+    {
+      "id": "C7-provenance-gate-ci-red",
+      "claim": "Action cards without a full provenance triple fail registry lint — the CI gate catches them",
+      "command": "go test ./internal/actions -run '^TestBadFixturesFailLint$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C8-vm-params-never-on-command-line",
+      "claim": "vm-adapter parameters travel inside an uploaded JSON file, never on the command line",
+      "command": "go test ./internal/adapters/vm -run '^TestVMParamsNeverReachCommandLine$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C9-scope-fail-closed",
+      "claim": "Empty allowlists deny every technique; a scope without adapters or targets refuses to load",
+      "command": "go test ./internal/kernel -run '^TestEmptyAllowlistsDenyAll$' && go test ./internal/kernel -run '^TestLoadScopeFailClosed$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C10-pentest-budget-termination",
+      "claim": "pentest mode runs to budget exhaustion and still terminates gracefully (DONE, exit 0) with opportunistic findings",
+      "command": "go test ./internal/engine -run '^TestPentestRunsToBudgetExhaustion$' && go test ./internal/engine -run '^TestPentestOptionalAssertionFallsBackToCardTitle$'",
+      "tier": "ci"
+    },
+    {
+      "id": "C11-mcp-round-trip",
+      "claim": "The MCP server completes an initialize → tools/list → tools/call round trip over stdio",
+      "command": "go test ./internal/mcp -run '^TestToolsListAndCall$' && go test ./internal/mcp -run '^TestInitializeHandshake$'",
+      "tier": "ci"
+    },
+    {
+      "id": "L1-lite-lab-up-healthy",
+      "claim": "The bundled lite lab comes up healthy (all containers) on this machine",
+      "command": "go run ./cmd/hesper lab up --profile lite",
+      "tier": "live"
+    },
+    {
+      "id": "L2-scripted-run-proven-finding",
+      "claim": "A scripted validation run on the live lite lab produces at least one proven finding with a verified evidence chain",
+      "command": "go run ./cmd/hesper validate --scope schemas/v0/scope.manifest.example.json --scripted plans/lab-lite-demo.plan.json --run-dir /tmp/hesper-claim-l2 && go run ./cmd/hesper evidence verify /tmp/hesper-claim-l2",
+      "tier": "live"
+    }
+  ]
+}

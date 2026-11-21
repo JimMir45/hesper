@@ -19,6 +19,7 @@ import (
 	"github.com/JimMir45/hesper/internal/actions"
 	"github.com/JimMir45/hesper/internal/adapters"
 	"github.com/JimMir45/hesper/internal/adapters/proc"
+	"github.com/JimMir45/hesper/internal/claims"
 	"github.com/JimMir45/hesper/internal/config"
 	"github.com/JimMir45/hesper/internal/egress"
 	"github.com/JimMir45/hesper/internal/engine"
@@ -26,6 +27,7 @@ import (
 	"github.com/JimMir45/hesper/internal/findings"
 	"github.com/JimMir45/hesper/internal/kernel"
 	"github.com/JimMir45/hesper/internal/lab"
+	"github.com/JimMir45/hesper/internal/mcp"
 	"github.com/JimMir45/hesper/internal/planner"
 	plannerclient "github.com/JimMir45/hesper/internal/planner/client"
 	"github.com/JimMir45/hesper/internal/report"
@@ -65,7 +67,11 @@ func run(args []string) int {
 		return cmdEvidence(args[1:])
 	case "stop":
 		return cmdStop(args[1:])
-	case "report", "mcp":
+	case "mcp":
+		return cmdMCP(args[1:])
+	case "claims":
+		return cmdClaims(args[1:])
+	case "report":
 		fmt.Fprintf(os.Stderr, "hesper %s: not implemented yet (see docs/plan.md)\n", args[0])
 		return exitUsageOrContract
 	default:
@@ -88,7 +94,8 @@ Usage:
   hesper stop --run <run-dir>              request a graceful stop (STOP file)
   hesper evidence verify <run-dir>         verify the evidence hash chain
   hesper report <show|render>              inspect run output (M3+)
-  hesper mcp                               serve MCP tools (M5)
+  hesper mcp                               serve MCP tools over stdio (M5-2)
+  hesper claims verify [--with-live]       re-verify every machine-checkable claim (M5-3)
   hesper version
 `)
 }
@@ -557,6 +564,48 @@ func cmdStop(args []string) int {
 		return exitOperational
 	}
 	fmt.Printf("stop requested: %s (engine drains its in-flight action, then STOPPED)\n", *run)
+	return exitOK
+}
+
+// cmdMCP implements `hesper mcp`: serves the MCP tool surface over stdio
+// (design §11 — one of the shells above the headless core).
+func cmdMCP(args []string) int {
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "usage: hesper mcp")
+		return exitUsageOrContract
+	}
+	srv := mcp.NewServer("hesper", version, mcp.RealTools(mcp.ToolsOptions{}))
+	if err := srv.Serve(context.Background(), os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp:", err)
+		return exitOperational
+	}
+	return exitOK
+}
+
+// cmdClaims implements `hesper claims verify` (design §8.5): re-runs every
+// machine-checkable claim in claims.json. CI tier must be green; live tier
+// is skipped unless --with-live.
+func cmdClaims(args []string) int {
+	fs := flag.NewFlagSet("claims", flag.ContinueOnError)
+	withLive := fs.Bool("with-live", false, "also run live-tier claims (need the bundled lab)")
+	file := fs.String("file", "claims.json", "path to the claims file")
+	if err := fs.Parse(args); err != nil {
+		return exitUsageOrContract
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "verify" {
+		fmt.Fprintln(os.Stderr, "usage: hesper claims verify [--with-live] [--file <claims.json>]")
+		return exitUsageOrContract
+	}
+	results, err := claims.Verify(*file, *withLive, claims.ExecRunner())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "claims:", err)
+		return exitUsageOrContract
+	}
+	summary, allOK := claims.Summary(results)
+	fmt.Print(summary)
+	if !allOK {
+		return exitOperational
+	}
 	return exitOK
 }
 

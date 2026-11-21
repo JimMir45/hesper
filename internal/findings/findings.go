@@ -101,9 +101,19 @@ func GapTriggered(card actions.Card, r *evidence.Record, hitsByRule map[string][
 // Build constructs the findings of a run. Actions that did not happen
 // (denied, unknown card, incomplete must_capture) produce NO finding —
 // evidence semantics forbid referencing them (design §4.4/§6).
+//
+// In pentest mode proposals carry no assertion (design §3: opportunistic
+// findings) — an empty assertion falls back to the card title so every
+// finding still states what it demonstrates.
 func Build(runID string, outcomes []Outcome) []Finding {
 	var out []Finding
 	n := 0
+	assertionOf := func(o Outcome) string {
+		if o.Assertion != "" {
+			return o.Assertion
+		}
+		return "demonstrated: " + o.Card.Title
+	}
 	for _, o := range outcomes {
 		if o.UnknownCard != "" || o.Denied != "" || o.Record == nil || o.Record.Result == nil {
 			continue // did not happen
@@ -119,7 +129,7 @@ func Build(runID string, outcomes []Outcome) []Finding {
 			out = append(out, Finding{
 				ID:        fmt.Sprintf("f-%03d", n),
 				RunID:     runID,
-				Assertion: o.Assertion,
+				Assertion: assertionOf(o),
 				AttackID:  o.Card.Attack.TechniqueID,
 				Status:    StatusDisproven,
 				Evidence:  o.Record.Artifacts,
@@ -132,7 +142,7 @@ func Build(runID string, outcomes []Outcome) []Finding {
 		f := Finding{
 			ID:        fmt.Sprintf("f-%03d", n),
 			RunID:     runID,
-			Assertion: o.Assertion,
+			Assertion: assertionOf(o),
 			AttackID:  o.Card.Attack.TechniqueID,
 			Status:    StatusProven,
 			Evidence:  o.Record.Artifacts,

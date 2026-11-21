@@ -25,6 +25,16 @@ Contract:
 - When nothing more is useful, reply with [].
 `)
 
+	// Mode-specific objective (design §3): the two modes share one loop and
+	// differ ONLY in objective and termination — pin that here, where the
+	// model reads it.
+	switch s.Mode {
+	case "pentest":
+		system += "\n\nObjective (pentest mode): open-ended exploration under the scope. There is no fixed assertion list to close — keep proposing the most valuable in-scope actions until the budget is spent or nothing more is useful. Assertions are optional; state exactly what each action demonstrates."
+	default: // validate
+		system += "\n\nObjective (validate mode): close every target assertion — drive each one to proven or disproven with complete evidence — then reply with []."
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "mode: %s\nturn: %d\n", s.Mode, s.Turn)
 	fmt.Fprintf(&b, "budget: %d/%d actions used\n", s.Budget.UsedActions, s.Budget.MaxActions)

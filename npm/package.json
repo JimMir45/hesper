@@ -1,0 +1,20 @@
+{
+  "name": "@jimmir45/hesper",
+  "version": "0.1.0-dev",
+  "description": "npm wrapper for the Hesper binary — headless AI-native agent for adversarial exposure validation (the engine is a single static Go binary; this wrapper only downloads and runs it)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimMir45/hesper.git"
+  },
+  "bin": {
+    "hesper": "bin/hesper.js"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

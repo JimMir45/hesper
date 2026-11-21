@@ -31,6 +31,22 @@ Every major decision is grounded in documented, license-audited research:
 - [Action-library selection](docs/research/action-library-selection-20261120.md) — 30 candidate projects, license-audited, three-layer reuse model
 - [Bundled-lab composition](docs/research/lab-defense-stack-selection-20261120.md) — lab ranges and the detection stack, resource-budgeted for desktop machines
 
+## Machine-checkable claims
+
+Every capability claim in this README is backed by a claim in
+[claims.json](claims.json) and re-verified by CI (`hesper claims verify`):
+
+- planner parameters reach argv as literals — never a shell (C1)
+- missing evidence ⇒ the action did not happen; no finding may cite it (C2)
+- three egress violations stop the run with exit 1 (C3)
+- Sigma rules without an author are a hard error — DRL-1.1 attribution (C4)
+- the detection_gap verdict requires all four formal conditions (C5)
+- tampering with any chained record or artifact breaks `evidence verify` (C6)
+
+Live-lab claims (L1/L2) run with `hesper claims verify --with-live` when the
+bundled lab is up. Numbers in prose that cannot be traced to a green claim
+do not belong here.
+
 ## Responsible use
 
 Hesper runs **only against explicitly authorized targets**, and ships with a legitimate practice range so there is no reason to point it at anything else. The scope manifest is not advisory: out-of-scope actions are refused before execution, and every action is written to the audit log.

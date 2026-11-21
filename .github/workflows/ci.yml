@@ -11,6 +11,10 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      # verify-claims gate (design §8.5): every ci-tier claim in claims.json
+      # must re-verify green — README numbers trace to this, not to prose.
+      - name: claims verify
+        run: go run ./cmd/hesper claims verify
       # Action-card provenance gate (design §5.2): every checked-in card must
       # carry its source triple, and the linter must still catch bad cards.
       - name: action-card lint gate
