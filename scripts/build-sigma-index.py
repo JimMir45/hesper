@@ -24,29 +24,30 @@ HEADER_FIELDS = ("title", "id", "author", "level")
 
 
 def parse_rule(path):
+    # M4-live fix: the old header-termination logic stopped at the first
+    # unknown alphanumeric key ("status:"/"description:" precede "author:" in
+    # every SigmaHQ rule) — the live index build produced 3164/3164 rules
+    # with an empty author. New approach: scan the whole file for top-level
+    # (column-0) "key: value" lines whose key is one of HEADER_FIELDS.
+    # title/id/author/level only ever appear at top level; "level:" sits after
+    # the detection block in many rules, so no early break is safe. List
+    # documents (first line "- ...") are skipped as non-rules.
     meta = {}
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        in_header = True
         for line in f:
-            s = line.strip()
-            if not s:
+            if not line.strip():
                 continue
-            if s.startswith("-") or s.startswith(" "):
-                if s.startswith("-") and not meta:
-                    in_header = False  # list document: not a rule
-                if not in_header:
-                    continue
-            if ":" in s and in_header:
-                key, _, value = s.partition(":")
-                key = key.strip()
-                if key in HEADER_FIELDS and key not in meta:
-                    v = value.strip().strip('"').strip("'")
-                    if v:
-                        meta[key] = v
-                elif key not in HEADER_FIELDS and len(meta) >= 1 and key.isalnum():
-                    in_header = False
-            else:
-                in_header = False
+            if line[:1] in (" ", "\t") or line.lstrip().startswith("-"):
+                continue  # nested content / list items: never header fields
+            st = line.strip()
+            key, sep, value = st.partition(":")
+            if not sep:
+                continue
+            key = key.strip()
+            if key in HEADER_FIELDS and key not in meta:
+                v = value.strip().strip('"').strip("'")
+                if v:
+                    meta[key] = v
     return meta
 
 

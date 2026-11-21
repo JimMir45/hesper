@@ -2,41 +2,47 @@ package detection
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/JimMir45/hesper/internal/findings"
 )
 
-func TestVelociraptorJudgeContract(t *testing.T) {
-	var gotAuth, gotVQL string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/health":
-			w.WriteHeader(http.StatusOK)
-		case "/api/v1/query":
-			gotAuth = r.Header.Get("Authorization")
-			var body struct{ VQL string }
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			gotVQL = body.VQL
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"rows":[
-				{"rule":"Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)","author":"Thomas Patzke","level":"medium","attack":"t1003.003","count":3,"timestamp":"2026-11-21T10:00:10Z"},
-				{"rule":"Suspicious Process Patterns NTDS.DIT Exfil","author":"","level":"","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:20Z"}
-			]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
+// runFakeVelo returns a CommandContext whose output is a controlled fixture
+// via the real "printf" binary (deterministic, dependency-free — same trick
+// as the chainsaw fakes). argv is captured for strictness assertions.
+func runFakeVelo(fixture string) (func(ctx context.Context, name string, args ...string) *exec.Cmd, *sync.Mutex, *[]string) {
+	var mu sync.Mutex
+	var calls []string
+	factory := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		mu.Lock()
+		calls = append(append([]string{name}, args...))
+		mu.Unlock()
+		return exec.CommandContext(ctx, "printf", "%s", fixture)
+	}
+	return factory, &mu, &calls
+}
 
-	t.Setenv("HESPER_VELO_KEY", "secret-token-123")
-	client := &VeloClient{BaseURL: srv.URL, APIKeyEnv: "HESPER_VELO_KEY", HTTP: srv.Client()}
+func runFailingVelo() func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "echo velo-down >&2; exit 3")
+	}
+}
+
+// Live-verified CLI response shape: one JSON array of row objects.
+const veloArrayFixture = `[
+ {"rule":"Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)","author":"Thomas Patzke","level":"medium","attack":"t1003.003","count":3,"timestamp":"2026-11-21T10:00:10Z"},
+ {"rule":"Suspicious Process Patterns NTDS.DIT Exfil","author":"","level":"","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:20Z"}
+]`
+
+func TestVelociraptorJudgeContract(t *testing.T) {
+	t.Setenv("HESPER_VELO_CFG", "/opt/hesper/velo-api-client.yaml")
+	factory, mu, calls := runFakeVelo(veloArrayFixture)
+	client := &VeloClient{BinaryPath: "velociraptor", APIConfigEnv: "HESPER_VELO_CFG", CommandContext: factory}
 	if !client.Health(context.Background()) {
-		t.Fatal("health must be true against stub")
+		t.Fatal("health must be true when the CLI query succeeds")
 	}
 
 	j := &VelociraptorJudge{Client: client, Index: RuleIndex{
@@ -52,12 +58,17 @@ func TestVelociraptorJudgeContract(t *testing.T) {
 	if len(hits) != 2 {
 		t.Fatalf("want 2 hits, got %+v", hits)
 	}
-	if gotAuth != "Bearer secret-token-123" {
-		t.Fatalf("api key by env name not sent: %q", gotAuth)
+
+	mu.Lock()
+	got := strings.Join(*calls, " ")
+	mu.Unlock()
+	if !strings.HasPrefix(got, "velociraptor -a /opt/hesper/velo-api-client.yaml query ") {
+		t.Fatalf("argv must be strict (-a <cfg> query <vql>): %q", got)
 	}
-	if !strings.Contains(gotVQL, `"t1003.003"`) {
-		t.Fatalf("VQL must filter on the technique join key: %q", gotVQL)
+	if !strings.Contains(got, `"t1003.003"`) {
+		t.Fatalf("VQL must filter on the technique join key: %q", got)
 	}
+
 	byRule := hitMap(hits)
 	if byRule["Invocation of Active Directory Diagnostic Tool (ntdsutil.exe)"].Matches != 3 {
 		t.Fatalf("match count wrong: %+v", hits)
@@ -68,17 +79,17 @@ func TestVelociraptorJudgeContract(t *testing.T) {
 	}
 }
 
-func TestVelociraptorJudgeAttributionFailClosed(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/query" {
-			_, _ = w.Write([]byte(`{"rows":[{"rule":"Ghost Rule","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:10Z"}]}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
+func TestVelociraptorConfigEnvFailClosed(t *testing.T) {
+	client := &VeloClient{BinaryPath: "velociraptor", APIConfigEnv: "HESPER_VELO_CFG_MISSING"}
+	if _, err := client.Query(context.Background(), "SELECT 1"); err == nil {
+		t.Fatal("query without the api-config env set must fail closed, not run unauthenticated")
+	}
+}
 
-	j := &VelociraptorJudge{Client: &VeloClient{BaseURL: srv.URL, HTTP: srv.Client()}}
+func TestVelociraptorJudgeAttributionFailClosed(t *testing.T) {
+	t.Setenv("HESPER_VELO_CFG", "/opt/hesper/velo-api-client.yaml")
+	factory, _, _ := runFakeVelo(`[{"rule":"Ghost Rule","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:10Z"}]`)
+	j := &VelociraptorJudge{Client: &VeloClient{APIConfigEnv: "HESPER_VELO_CFG", CommandContext: factory}}
 	w := Window{From: ts("2026-11-21T10:00:00Z"), To: ts("2026-11-21T10:02:00Z")}
 	refs := []ActionRef{{ID: "a1", AttackID: "T1003.003", TS: ts("2026-11-21T10:00:05Z")}}
 	if _, err := j.Correlate(context.Background(), w, refs); err == nil {
@@ -86,24 +97,23 @@ func TestVelociraptorJudgeAttributionFailClosed(t *testing.T) {
 	}
 }
 
-func TestAutoJudgePicksHealthyPath(t *testing.T) {
-	onlineSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if r.URL.Path == "/api/v1/query" {
-			_, _ = w.Write([]byte(`{"rows":[{"rule":"Online Rule","author":"A","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:10Z"}]}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer onlineSrv.Close()
+func TestVelociraptorQuerySurfacesStderr(t *testing.T) {
+	t.Setenv("HESPER_VELO_CFG", "/opt/hesper/velo-api-client.yaml")
+	client := &VeloClient{APIConfigEnv: "HESPER_VELO_CFG", CommandContext: runFailingVelo()}
+	_, err := client.Query(context.Background(), "SELECT 1")
+	if err == nil || !strings.Contains(err.Error(), "velo-down") {
+		t.Fatalf("CLI failure must surface stderr: %v", err)
+	}
+}
 
+func TestAutoJudgePicksHealthyPath(t *testing.T) {
+	t.Setenv("HESPER_VELO_CFG", "/opt/hesper/velo-api-client.yaml")
+	onlineFactory, _, _ := runFakeVelo(`[{"rule":"Online Rule","author":"A","attack":"t1003.003","count":1,"timestamp":"2026-11-21T10:00:10Z"}]`)
 	offline := offlineJudge(`{"timestamp":"2026-11-21T10:00:05Z","name":"Offline Rule","level":"high","tags":["attack.t1003.003"]}`)
 	offline.Index = RuleIndex{"Offline Rule": {Author: "B"}}
+	client := &VeloClient{APIConfigEnv: "HESPER_VELO_CFG", CommandContext: onlineFactory}
 	auto := &AutoJudge{
-		Online:  &VelociraptorJudge{Client: &VeloClient{BaseURL: onlineSrv.URL, HTTP: onlineSrv.Client()}},
+		Online:  &VelociraptorJudge{Client: client},
 		Offline: offline,
 	}
 	w := Window{From: ts("2026-11-21T10:00:00Z"), To: ts("2026-11-21T10:02:00Z")}
@@ -117,8 +127,8 @@ func TestAutoJudgePicksHealthyPath(t *testing.T) {
 		t.Fatalf("online path not used: path=%s hits=%+v", auto.LastPath(), hits)
 	}
 
-	// Server dies -> auto falls back offline.
-	onlineSrv.Close()
+	// CLI starts failing -> auto falls back offline.
+	client.CommandContext = runFailingVelo()
 	hits, err = auto.Correlate(context.Background(), w, refs)
 	if err != nil {
 		t.Fatalf("Correlate offline fallback: %v", err)

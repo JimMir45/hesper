@@ -75,17 +75,11 @@ func (o *OfflineJudge) Correlate(ctx context.Context, w Window, refs []ActionRef
 	}
 
 	counts := map[string]*findings.Hit{}
-	sc := bufio.NewScanner(&stdout)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		var h chainsawHit
-		if err := json.Unmarshal(line, &h); err != nil {
-			continue // non-JSON line (chainsaw banner): skip
-		}
+	rawHits, err := parseChainsawOutput(stdout.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("offline judge: parse chainsaw output: %w", err)
+	}
+	for _, h := range rawHits {
 		if h.Name == "" {
 			continue
 		}
@@ -113,10 +107,6 @@ func (o *OfflineJudge) Correlate(ctx context.Context, w Window, refs []ActionRef
 		}
 		counts[h.Name] = &findings.Hit{RuleID: h.Name, Author: meta.Author, Level: meta.Level, Matches: 1}
 	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("offline judge: scan: %w", err)
-	}
-
 	hits := make([]findings.Hit, 0, len(counts))
 	for name := range counts {
 		hits = append(hits, *counts[name])
@@ -124,6 +114,40 @@ func (o *OfflineJudge) Correlate(ctx context.Context, w Window, refs []ActionRef
 	// Deterministic order for goldens.
 	sortHits(hits)
 	return hits, nil
+}
+
+// parseChainsawOutput accepts both shapes chainsaw emits: v2.1x "hunt --json"
+// writes ONE JSON array of hit objects (verified live against v2.18 output —
+// name/level/tags/timestamp are top-level; see m4-live-checklist); older
+// builds emitted NDJSON lines with a text banner. Banner/non-JSON lines are
+// skipped in the NDJSON path only.
+func parseChainsawOutput(b []byte) ([]chainsawHit, error) {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 {
+		return nil, nil
+	}
+	if b[0] == '[' {
+		var arr []chainsawHit
+		if err := json.Unmarshal(b, &arr); err != nil {
+			return nil, err
+		}
+		return arr, nil
+	}
+	var hits []chainsawHit
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var h chainsawHit
+		if err := json.Unmarshal(line, &h); err != nil {
+			continue // non-JSON line (chainsaw banner): skip
+		}
+		hits = append(hits, h)
+	}
+	return hits, sc.Err()
 }
 
 func hitInWindow(ts string, w Window) bool {

@@ -5,9 +5,10 @@
 $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force -Path C:\Hesper\deps | Out-Null
 
-# Port 47807: verified free on this shared host (18080 is owned by a company
-# SPA that answers 200-with-index.html to every path — M4-1 finding).
-$base = "http://10.0.2.2:47807"
+# Port 48999: verified free on this shared host (18080 is owned by a company
+# SPA answering 200-with-index.html to every path; 47807 shows "in use" only
+# inside mirrored-WSL despite being invisible in netstat — M4-1 findings).
+$base = "http://10.0.2.2:48999"
 $expected = @{ "Sysmon64.exe" = 3203368; "sysmonconfig.xml" = 360048; "vulnAD.ps1" = 65052 }
 foreach ($f in @("Sysmon64.exe", "sysmonconfig.xml", "vulnAD.ps1")) {
     $out = "C:\Hesper\deps\$f"

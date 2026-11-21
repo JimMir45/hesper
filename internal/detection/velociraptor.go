@@ -5,60 +5,65 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/JimMir45/hesper/internal/findings"
 )
 
-// VeloClient talks to a Velociraptor server's HTTP API. The API key is
-// referenced by environment variable NAME only (design §4.5) — a key value
-// never appears in configuration or files.
+// VeloClient talks to a Velociraptor server through the official CLI:
 //
-// Wire contract (ours; the stub server in velociraptor_test.go pins it):
+//	velociraptor -a <api-config.yaml> query '<VQL>'  ->  stdout = JSON array of rows
 //
-//	GET  {base}/api/v1/health            -> 200 when healthy
-//	POST {base}/api/v1/query  {"vql":...} -> {"rows":[{"rule":"<name>",
-//	                                    "author":"...","level":"...",
-//	                                    "attack":"t1003.003",
-//	                                    "count":2,"timestamp":"RFC3339"}]}
+// This is the LIVE-VERIFIED contract (M4 live pass, v0.77 server):
+//   - Direct HTTP /api/v1/query is gorilla-CSRF-protected for every caller
+//     (403 "referer not supplied", then "CSRF token not found"), including
+//     valid client certificates; /api/v1/health answers 401 to cert clients.
+//   - The supported programmatic path is the CLI with an api-client config
+//     minted server-side (`velociraptor --config server.config.yaml config
+//     api_client --name <n> --role administrator <out.yaml>`); verified:
+//     SELECT Version FROM info() → [{"Version": null}].
+//   - Running the AGPL binary as an external process (never linked) is also
+//     the license-isolation rule from the action-library research.
 //
-// The rows schema mirrors what a curated-Sigma VQL notebook returns after
-// Server.Import.CuratedSigma + Windows.Sigma.EventLogs. Live verification
-// against a real Velociraptor is on the M4 live checklist.
+// The api config yaml carries the client certificate+key; its location is
+// referenced by environment variable NAME from run.config (spirit of
+// "secrets by env-var name": the operator provisions the file, config never
+// holds key material).
 type VeloClient struct {
-	BaseURL   string
-	APIKeyEnv string
-	// HTTP is injectable for tests; defaults to http.DefaultClient.
-	HTTP *http.Client
+	BinaryPath string // velociraptor CLI binary (default "velociraptor")
+	// APIConfigEnv names the env var whose value is the api-config yaml path.
+	APIConfigEnv string
+	// CommandContext is injectable for tests; defaults to exec.CommandContext.
+	CommandContext func(ctx context.Context, name string, arg ...string) *exec.Cmd
 }
 
-func (c *VeloClient) httpClient() *http.Client {
-	if c.HTTP != nil {
-		return c.HTTP
+func (c *VeloClient) cmdFactory() func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	if c.CommandContext != nil {
+		return c.CommandContext
 	}
-	return http.DefaultClient
+	return exec.CommandContext
 }
 
-// Health reports whether the endpoint answers.
-func (c *VeloClient) Health(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.BaseURL, "/")+"/api/v1/health", nil)
-	if err != nil {
-		return false
+func (c *VeloClient) binary() string {
+	if c.BinaryPath == "" {
+		return "velociraptor"
 	}
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return c.BinaryPath
 }
 
-type veloQueryRequest struct {
-	VQL string `json:"vql"`
+// argv returns the strict argv — no shell, fixed order.
+func (c *VeloClient) argv(vql string) []string {
+	return []string{c.binary(), "-a", c.apiConfigPath(), "query", vql}
+}
+
+func (c *VeloClient) apiConfigPath() string {
+	if c.APIConfigEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.APIConfigEnv)
 }
 
 type veloRow struct {
@@ -70,37 +75,37 @@ type veloRow struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// Query runs one VQL statement and returns its rows.
+// Query runs one VQL statement through the CLI and returns its rows. The CLI
+// prints one JSON array (live-verified); a non-zero exit surfaces stderr.
 func (c *VeloClient) Query(ctx context.Context, vql string) ([]veloRow, error) {
-	body, err := json.Marshal(veloQueryRequest{VQL: vql})
-	if err != nil {
-		return nil, err
+	cfg := c.apiConfigPath()
+	if c.APIConfigEnv != "" && cfg == "" {
+		return nil, fmt.Errorf("velociraptor: env %s (api config path) is not set", c.APIConfigEnv)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.BaseURL, "/")+"/api/v1/query", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
+	factory := c.cmdFactory()
+	argv := c.argv(vql)
+	cmd := factory(ctx, argv[0], argv[1:]...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("velociraptor: query: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.APIKeyEnv != "" {
-		if key := os.Getenv(c.APIKeyEnv); key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
+	out := bytes.TrimSpace(stdout.Bytes())
+	if len(out) == 0 {
+		return nil, nil
 	}
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("velociraptor: query: %w", err)
+	var rows []veloRow
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil, fmt.Errorf("velociraptor: decode rows: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("velociraptor: query: status %d", resp.StatusCode)
-	}
-	var out struct {
-		Rows []veloRow `json:"rows"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&out); err != nil {
-		return nil, fmt.Errorf("velociraptor: decode: %w", err)
-	}
-	return out.Rows, nil
+	return rows, nil
+}
+
+// Health runs the cheapest query; the CLI exit status is the health signal.
+func (c *VeloClient) Health(ctx context.Context) bool {
+	_, err := c.Query(ctx, "SELECT * FROM info()")
+	return err == nil
 }
 
 // VelociraptorJudge is the online detection path (design §5.5).
@@ -112,8 +117,9 @@ type VelociraptorJudge struct {
 }
 
 // Correlate queries curated-Sigma hits for the referenced techniques within
-// the window. Server-side filtering is by attack tag + timestamp range;
-// client-side filtering is defense in depth.
+// the window. The row shape (rule/author/level/attack/count/timestamp) is
+// OUR select-alias contract: the VQL below names the columns, the CLI
+// returns them verbatim, the client unmarshals by these keys.
 func (v *VelociraptorJudge) Correlate(ctx context.Context, w Window, refs []ActionRef) ([]findings.Hit, error) {
 	techs := map[string]bool{}
 	for _, r := range refs {
