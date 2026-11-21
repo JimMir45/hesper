@@ -1,0 +1,88 @@
+# Release workflow (M5-4): static binaries for the npm wrapper's download
+# contract — hesper_<version>_<os>_<arch>[.exe] + SHA256SUMS.
+#
+#   push tag v*        → build matrix + create the GitHub Release with assets
+#   workflow_dispatch  → build matrix only (dry run; never publishes)
+#
+# Do not tag until the live-lab checklist, the demo video, and the real-model
+# smoke are green and the owner has signed off.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # tag builds create the release
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ''
+          - goos: linux
+            goarch: arm64
+            ext: ''
+          - goos: windows
+            goarch: amd64
+            ext: '.exe'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: build static binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          VERSION=""
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9].* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-dev+${GITHUB_SHA:0:7}"
+          fi
+          ART="hesper_${VERSION}_${GOOS}_${GOARCH}${{ matrix.ext }}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/${ART}" ./cmd/hesper
+          ( cd dist && sha256sum "${ART}" > "SHA256SUMS.${GOOS}-${GOARCH}" )
+          echo "artifact=${ART}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: create release (tag pushes only)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: merge checksums
+        run: |
+          set -euo pipefail
+          cat dist/SHA256SUMS.* > dist/SHA256SUMS
+          rm dist/SHA256SUMS.*
+          ls -la dist/
+      - name: create GitHub release with assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "hesper ${GITHUB_REF_NAME}" \
+            --generate-notes

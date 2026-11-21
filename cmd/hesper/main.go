@@ -33,7 +33,9 @@ import (
 	"github.com/JimMir45/hesper/internal/report"
 )
 
-const version = "0.1.0-dev"
+// version is overridable at build time: release builds inject it with
+// -ldflags "-X main.version=<tag>".
+var version = "0.1.0-dev"
 
 const exitOK = 0
 const exitOperational = 1 // lab unhealthy, evidence violation, environment failures
