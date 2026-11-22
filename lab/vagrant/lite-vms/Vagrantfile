@@ -17,10 +17,19 @@ Vagrant.configure("2") do |config|
   files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
 
   config.vm.communicator = :winrm
-  # Post-promotion the DC resolves bare "vagrant" against AD (no such domain
-  # user in fresh runs) and NTLM fails — HESPER_WINRM_USER lets promoted
-  # machines re-auth with the domain-mirrored account (vagrant@hesper.lab).
-  config.winrm.username = ENV["HESPER_WINRM_USER"] || "vagrant"
+  # WinRM shell provisioners wrap scripts in an elevated scheduled task whose
+  # principal defaults to the box's vagrant account — dead after domain
+  # promotion (machine rename). Devbox (Hyper-V, promoted) pins the literal
+  # domain principal; original-host runs keep env-overridable defaults.
+  # NOTE: these are FINAL — no later assignment may overwrite them (a
+  # hardcoded literal below silently beat the env value; attempt-10 lesson).
+  elevated_user = "vagrant@hesper.lab"
+  elevated_password = "vagrant"
+  if ENV["HESPER_NO_PRIVATE_NET"].nil?
+    elevated_user = ENV["HESPER_WINRM_USER"] || "vagrant"
+    elevated_password = ENV["HESPER_WINRM_PASS"] || "vagrant"
+  end
+  config.winrm.username = elevated_user
   # No default synced folder: the hyperv provider's default is SMB, which
   # prompts interactively for HOST credentials — fatal headless. Provisions
   # travel over HTTP (deps) and WinRM uploads (scripts) instead.
@@ -28,22 +37,10 @@ Vagrant.configure("2") do |config|
   # Windows eval boots are slow (VBox nested mode; Hyper-V on a 6-core i5 is
   # real VT-x but still unhurried). GOAD uses long boot timeouts likewise.
   config.vm.boot_timeout = 1800
-  # NOTE: the winrm username/password are FINAL here (line above) — earlier
-  # env-based values were being silently overwritten by these literals.
   config.winrm.timeout = 1200
   config.winrm.basic_auth_only = true
   config.winrm.transport = :plaintext
   config.winrm.max_tries = 30
-
-  # WinRM shell provisioners wrap scripts in an elevated scheduled task whose
-  # principal defaults to the box's vagrant account — dead after domain
-  # promotion (machine rename). Devbox (Hyper-V, promoted) pins the literal
-  # domain principal; original-host runs keep env-overridable defaults.
-  elevated_user = "vagrant@hesper.lab"
-  elevated_password = "vagrant"
-  if ENV["HESPER_NO_PRIVATE_NET"].nil?
-    elevated_user = ENV["HESPER_WINRM_USER"] || "vagrant"
-    elevated_password = ENV["HESPER_WINRM_PASS"] || "vagrant"
   end
 
   # ---- DC01: forest root + vulnerable-AD + Sysmon ----
