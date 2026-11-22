@@ -41,10 +41,11 @@ export HESPER_VM_MACHINE=dc
 export HESPER_VAGRANT_BIN=vagrant.exe
 export HESPER_EVTX_COLLECT=1
 export HESPER_EVTX_SAMPLES="$HOME/hesper/lab/state/evtx-samples"
-export HESPER_CHAINSAW="$HOME/hesper/lab/state/chainsaw/chainsaw"
+export HESPER_CHAINSAW="$HOME/hesper/lab/state/bin/chainsaw"
 export HESPER_SIGMA_RULES="$HOME/hesper/lab/state/sigma/rules"
 export HESPER_SIGMA_INDEX="$HOME/hesper/lab/state/sigma/index.json"
-export HESPER_SIGMA_MAPPING="$HOME/hesper/lab/state/sigma/mapping.json"
+# HESPER_SIGMA_MAPPING left unset: chainsaw uses its built-in sigma mappings
+# (same as compose.zero-vm; fetch script's mapping dir is empty on devbox).
 mkdir -p "$HESPER_EVTX_SAMPLES"
 
 echo "== run =="
