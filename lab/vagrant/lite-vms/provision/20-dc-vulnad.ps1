@@ -1,6 +1,22 @@
 # Inject AD misconfigurations via vulnerable-AD (safebuffer, MIT) - idempotent.
 $ErrorActionPreference = "Stop"
-Import-Module ActiveDirectory -ErrorAction Stop
+
+# AD services warm up across the post-promotion reboot; the AD PowerShell
+# provider's InitializeDefaultDrives fails transiently right after boot
+# (attempt-13). Poll until ADWS answers, then import.
+for ($i = 1; $i -le 30; $i++) {
+    try {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $null = Get-ADDomain -ErrorAction Stop
+        Write-Output "AD-READY after $i try/tries"
+        break
+    } catch {
+        Write-Output "AD-NOT-READY try $i : $($_.Exception.Message.Substring(0, [Math]::Min(60, $_.Exception.Message.Length)))"
+        Start-Sleep -Seconds 10
+        if ($i -eq 30) { throw "AD never became ready: $($_.Exception.Message)" }
+        # re-enter loop; Import-Module retries inside the try
+    }
+}
 
 $marker = "C:\Hesper\provision\vulnad.done"
 if (Test-Path $marker) { Write-Output "VULNAD-ALREADY"; exit 0 }
