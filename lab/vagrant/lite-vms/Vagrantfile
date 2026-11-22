@@ -23,7 +23,7 @@ Vagrant.configure("2") do |config|
   # domain principal; original-host runs keep env-overridable defaults.
   # NOTE: these are FINAL — no later assignment may overwrite them (a
   # hardcoded literal below silently beat the env value; attempt-10 lesson).
-  elevated_user = "vagrant@hesper.lab"
+  elevated_user = "hesper\\vagrant"
   elevated_password = "vagrant"
   if ENV["HESPER_NO_PRIVATE_NET"].nil?
     elevated_user = ENV["HESPER_WINRM_USER"] || "vagrant"
