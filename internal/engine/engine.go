@@ -19,6 +19,7 @@ import (
 	"github.com/JimMir45/hesper/internal/actions"
 	"github.com/JimMir45/hesper/internal/adapters"
 	"github.com/JimMir45/hesper/internal/config"
+	"github.com/JimMir45/hesper/internal/detection"
 	"github.com/JimMir45/hesper/internal/evidence"
 	"github.com/JimMir45/hesper/internal/findings"
 	"github.com/JimMir45/hesper/internal/kernel"
@@ -59,6 +60,10 @@ type Options struct {
 
 	ActionTimeout    time.Duration // default 5m
 	MaxEvidenceTail  int           // default 8
+	// Judge, when non-nil, runs detection correlation over executed
+	// outcomes in the CORRELATE phase (design §5.5); nil keeps the M3
+	// behavior (findings without sigma attachment).
+	Judge detection.Judge
 	// ForceAbort, when closed, escalates a stop into ABORTED (second signal).
 	ForceAbort <-chan struct{}
 	// Egress is the violation monitor (design §6). Nil ⇒ default threshold.
@@ -229,6 +234,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			return res, nil
 		}
 	}
+	CorrelateOutcomes(ctx, o.Judge, o.Cfg.Judge.CorrelationWindowS, outcomes, o.Audit)
 	res.Findings = findings.Build(o.RunID, outcomes)
 	setState(st, "REPORT", runDirAbs)
 	if err := writeOutputs(o, runDirAbs, st, res); err != nil {
@@ -239,6 +245,57 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	})
 	setState(st, terminal, runDirAbs)
 	return res, nil
+}
+
+// CorrelateOutcomes joins executed outcomes with judge hits (design §5.5),
+// populating Outcome.HitsByRule before findings.Build consumes them. A judge
+// error degrades to unjudged findings (§6 JudgeError) — never fails the run.
+func CorrelateOutcomes(ctx context.Context, j detection.Judge, windowSec int, outcomes []findings.Outcome, audit *kernel.AuditLog) {
+	if j == nil {
+		return
+	}
+	refs, from, to := judgeRefs(outcomes)
+	if len(refs) == 0 {
+		return
+	}
+	w := detection.Window{From: from, To: to.Add(time.Duration(windowSec) * time.Second)}
+	hits, err := j.Correlate(ctx, w, refs)
+	if err != nil {
+		if audit != nil {
+			_ = audit.Append("judge.error", map[string]any{"error": err.Error(), "refs": len(refs)})
+		}
+		return
+	}
+	byRule := detection.ByRule(hits)
+	for i := range outcomes {
+		outcomes[i].HitsByRule = byRule // rule-keyed; GapTriggered consults only the card's expected rules
+	}
+	if audit != nil {
+		_ = audit.Append("judge.correlated", map[string]any{"hits": len(hits), "refs": len(refs)})
+	}
+}
+
+// judgeRefs extracts executed, timestamped, ATT&CK-mapped action references.
+func judgeRefs(outcomes []findings.Outcome) ([]detection.ActionRef, time.Time, time.Time) {
+	var refs []detection.ActionRef
+	var from, to time.Time
+	for _, o := range outcomes {
+		if o.Record == nil || o.Record.Result == nil || o.Card.Attack.TechniqueID == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, o.Record.TS)
+		if err != nil {
+			continue
+		}
+		refs = append(refs, detection.ActionRef{ID: o.StepID, AttackID: o.Card.Attack.TechniqueID, TS: ts})
+		if from.IsZero() || ts.Before(from) {
+			from = ts
+		}
+		if ts.After(to) {
+			to = ts
+		}
+	}
+	return refs, from, to
 }
 
 // processProposal walks one proposal through resolve → gate → spend →

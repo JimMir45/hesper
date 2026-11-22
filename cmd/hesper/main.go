@@ -19,8 +19,10 @@ import (
 	"github.com/JimMir45/hesper/internal/actions"
 	"github.com/JimMir45/hesper/internal/adapters"
 	"github.com/JimMir45/hesper/internal/adapters/proc"
+	"github.com/JimMir45/hesper/internal/adapters/vm"
 	"github.com/JimMir45/hesper/internal/claims"
 	"github.com/JimMir45/hesper/internal/config"
+	"github.com/JimMir45/hesper/internal/detection"
 	"github.com/JimMir45/hesper/internal/egress"
 	"github.com/JimMir45/hesper/internal/engine"
 	"github.com/JimMir45/hesper/internal/evidence"
@@ -476,10 +478,16 @@ func runEngine(in engineInput) int {
 		fmt.Printf("egress: runtime enforcement on (local guard %s, level %s)\n", guard.Addr(), egress.LevelProxy)
 	}
 
+	adapterMap := map[string]adapters.Adapter{"proc": procAdapter}
+	if vmA, ok := vmAdapterIfConfigured(in.actionsRoot); ok {
+		adapterMap["vm"] = vmA
+	}
+
 	res, err := engine.Run(ctx, engine.Options{
 		RunDir: in.runDir, RunID: filepath.Base(in.runDir),
 		Scope: in.scope, Cfg: in.cfg, Registry: registry,
-		Adapters: map[string]adapters.Adapter{"proc": procAdapter},
+		Adapters: adapterMap,
+		Judge:    judgeIfConfigured(in.cfg),
 		Planner:  p, Audit: in.audit, Chain: chain, Budget: budgeter,
 		ForceAbort: abort,
 	})
@@ -730,6 +738,9 @@ func runScripted(in scriptedRunInput) int {
 		fmt.Printf("egress: runtime enforcement on (local guard %s, level %s)\n", guard.Addr(), egress.LevelProxy)
 	}
 	adaptersByName := map[string]adapters.Adapter{"proc": scriptedProc}
+	if vmA, ok := vmAdapterIfConfigured(in.actionsRoot); ok {
+		adaptersByName["vm"] = vmA
+	}
 	egressMonitor := kernel.NewEgressMonitor(0)
 	egressStopped := false
 
@@ -861,6 +872,7 @@ func runScripted(in scriptedRunInput) int {
 		return exitOperational
 	}
 
+	engine.CorrelateOutcomes(context.Background(), judgeIfConfigured(in.cfg), in.cfg.Judge.CorrelationWindowS, outcomes, in.audit)
 	found := findings.Build(runID, outcomes)
 	if err := writeJSON(filepath.Join(runDirAbs, "findings.json"), found); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -924,6 +936,59 @@ func mkDriverReq(card actions.Card, runID, actionID string, params map[string]st
 		Target:   kernel.Target{Kind: "host", Value: target},
 		WorkDir:  workDir,
 	}
+}
+
+// judgeIfConfigured builds the detection judge from the environment (the
+// live-run wiring; formal run.config fields follow when the contract
+// stabilizes). Requires HESPER_CHAINSAW + HESPER_SIGMA_RULES +
+// HESPER_EVTX_SAMPLES (+ optional HESPER_SIGMA_MAPPING, HESPER_SIGMA_INDEX).
+// Returns nil (unjudged findings, §6) when the offline env is absent and no
+// Velociraptor endpoint is configured.
+func judgeIfConfigured(cfg *config.RunConfig) detection.Judge {
+	ch, rules, samples := os.Getenv("HESPER_CHAINSAW"), os.Getenv("HESPER_SIGMA_RULES"), os.Getenv("HESPER_EVTX_SAMPLES")
+	var offline *detection.OfflineJudge
+	if ch != "" && rules != "" && samples != "" {
+		offline = &detection.OfflineJudge{ChainsawPath: ch, RulesDir: rules, SamplesDir: samples}
+		if m := os.Getenv("HESPER_SIGMA_MAPPING"); m != "" {
+			offline.MappingPath = m
+		}
+		if idx := os.Getenv("HESPER_SIGMA_INDEX"); idx != "" {
+			ri, err := detection.LoadRuleIndex(idx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "sigma index: %v (hits will fail attribution — DRL fail-closed)\n", err)
+			} else {
+				offline.Index = ri
+			}
+		}
+	}
+	vURL := ""
+	if cfg != nil && cfg.Judge.Velociraptor != nil {
+		vURL = cfg.Judge.Velociraptor.URL
+	}
+	switch {
+	case vURL != "" && offline != nil:
+		return nil // online judge wiring lands with the agent check-in task
+	case offline != nil:
+		return offline
+	default:
+		return nil
+	}
+}
+
+// vmAdapterIfConfigured wires the vm adapter when HESPER_LITEVMS_DIR points
+// at a lite-vms Vagrantfile project (vagrant winrm transport). Without the
+// env, runs behave exactly as before (proc-only) — the VM leg is opt-in.
+func vmAdapterIfConfigured(actionsRoot string) (adapters.Adapter, bool) {
+	dir := os.Getenv("HESPER_LITEVMS_DIR")
+	if dir == "" {
+		return nil, false
+	}
+	w := &vm.VagrantWinRM{
+		ProjectDir: dir,
+		Machine:    os.Getenv("HESPER_VM_MACHINE"), // "" = vagrant default machine
+	}
+	fmt.Printf("vm: vagrant-winrm transport on %s (machine %q)\n", dir, w.Machine)
+	return vm.New(w, actionsRoot), true
 }
 
 func initRunDir(dir string) error {

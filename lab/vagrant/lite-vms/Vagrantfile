@@ -30,10 +30,12 @@ Vagrant.configure("2") do |config|
   # ---- DC01: forest root + vulnerable-AD + Sysmon ----
   config.vm.define "dc" do |dc|
     dc.vm.box = ENV["HESPER_DC_BOX"] || "StefanScherer/windows_2019"
-    # 2021.05.15 = newest virtualbox/vmware pin (original host).
-    # hyperv provider exists only up to 2020.02.12 (Vagrant Cloud API,
-    # verified 2026-11-24) — devbox runs pin it via HESPER_DC_BOX_VERSION.
-    dc.vm.box_version = ENV["HESPER_DC_BOX_VERSION"] || "2021.05.15"
+    # Pin only when requested: cloud-added boxes carry versions (2021.05.15
+    # = newest virtualbox/vmware; hyperv caps at 2020.02.12 per Vagrant Cloud
+    # API), while locally-imported box files carry none — an empty
+    # HESPER_DC_BOX_VERSION means "no version constraint" (devbox import).
+    dc_ver = ENV["HESPER_DC_BOX_VERSION"]
+    dc.vm.box_version = dc_ver unless dc_ver.nil? || dc_ver.empty?
     dc.vm.hostname = "DC01"
     # host-only net is VBox-only (Hyper-V Default Switch already provides
     # VM<->VM and VM<->host paths; a second switch would waste 16GB-RAM box)
@@ -64,7 +66,8 @@ Vagrant.configure("2") do |config|
   # ---- WKST01: domain workstation + Sysmon ----
   config.vm.define "wkst" do |w|
     w.vm.box = ENV["HESPER_WKST_BOX"] || "StefanScherer/windows_10"
-    w.vm.box_version = ENV["HESPER_WKST_BOX_VERSION"] || "2021.05.15"
+    w_ver = ENV["HESPER_WKST_BOX_VERSION"]
+    w.vm.box_version = w_ver unless w_ver.nil? || w_ver.empty?
     w.vm.hostname = "WKST01"
     if ENV["HESPER_NO_PRIVATE_NET"].nil?
       w.vm.network "private_network", ip: "192.168.56.20", netmask: "255.255.255.0"
