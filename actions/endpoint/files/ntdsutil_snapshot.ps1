@@ -16,7 +16,7 @@ $outDir = if ($params.out_dir) { $params.out_dir } else { "C:\hesper\out" }
 $marker = if ($params.marker) { $params.marker } else { "snapshot.marker" }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-# Snapshot create + list via ntdsutil — no dump material produced.
+# Snapshot create + list via ntdsutil - no dump material produced.
 ntdsutil "ac i ntds" "snaps" "create" "list all" "q" "q" |
     Tee-Object -FilePath "$outDir\ntdsutil_snapshot.log"
 
