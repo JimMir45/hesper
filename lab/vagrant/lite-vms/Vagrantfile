@@ -28,12 +28,23 @@ Vagrant.configure("2") do |config|
   # Windows eval boots are slow (VBox nested mode; Hyper-V on a 6-core i5 is
   # real VT-x but still unhurried). GOAD uses long boot timeouts likewise.
   config.vm.boot_timeout = 1800
-  config.winrm.username = "vagrant"
-  config.winrm.password = "vagrant"
+  # NOTE: the winrm username/password are FINAL here (line above) — earlier
+  # env-based values were being silently overwritten by these literals.
   config.winrm.timeout = 1200
   config.winrm.basic_auth_only = true
   config.winrm.transport = :plaintext
   config.winrm.max_tries = 30
+
+  # WinRM shell provisioners wrap scripts in an elevated scheduled task whose
+  # principal defaults to the box's vagrant account — dead after domain
+  # promotion (machine rename). Devbox (Hyper-V, promoted) pins the literal
+  # domain principal; original-host runs keep env-overridable defaults.
+  elevated_user = "vagrant@hesper.lab"
+  elevated_password = "vagrant"
+  if ENV["HESPER_NO_PRIVATE_NET"].nil?
+    elevated_user = ENV["HESPER_WINRM_USER"] || "vagrant"
+    elevated_password = ENV["HESPER_WINRM_PASS"] || "vagrant"
+  end
 
   # ---- DC01: forest root + vulnerable-AD + Sysmon ----
   config.vm.define "dc" do |dc|
@@ -70,11 +81,11 @@ Vagrant.configure("2") do |config|
       # switch at import (auto-detect; devbox has Default Switch + WSL only)
       hv.linked_clone = true
     end
-    dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
-    dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", reboot: true
-    dc.vm.provision "shell", path: "provision/20-dc-vulnad.ps1", reboot: true
-    dc.vm.provision "shell", path: "provision/30-sysmon.ps1"
-    dc.vm.provision "shell", path: "provision/40-network-check.ps1"
+    dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1", elevated_user: elevated_user, elevated_password: elevated_password
+    dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
+    dc.vm.provision "shell", path: "provision/20-dc-vulnad.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
+    dc.vm.provision "shell", path: "provision/30-sysmon.ps1", elevated_user: elevated_user, elevated_password: elevated_password
+    dc.vm.provision "shell", path: "provision/40-network-check.ps1", elevated_user: elevated_user, elevated_password: elevated_password
   end
 
   # ---- WKST01: domain workstation + Sysmon ----
@@ -102,7 +113,7 @@ Vagrant.configure("2") do |config|
       hv.linked_clone = true
     end
     w.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
-    w.vm.provision "shell", path: "provision/10-wkst-join.ps1", reboot: true
+    w.vm.provision "shell", path: "provision/10-wkst-join.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
     w.vm.provision "shell", path: "provision/30-sysmon.ps1"
     w.vm.provision "shell", path: "provision/40-network-check.ps1"
   end
