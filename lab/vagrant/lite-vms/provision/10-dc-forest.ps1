@@ -49,4 +49,15 @@ Install-ADDSForest `
     -NoRebootOnCompletion:$true `
     -Force:$true | Out-Null
 
+# Mirror the box's vagrant account into the domain (Domain Admins) so the
+# WinRM communicator keeps authenticating across the promotion reboot.
+# Without this, post-promotion WinRM resolves "vagrant" against AD first and
+# the COMException UserId failure kills every later provisioner (attempt-7).
+Import-Module ActiveDirectory
+New-ADUser -Name "vagrant" -SamAccountName "vagrant" `
+    -AccountPassword (ConvertTo-SecureString "vagrant" -AsPlainText -Force) `
+    -Enabled $true -PasswordNeverExpires $true
+Add-ADGroupMember "Domain Admins" "vagrant"
+Write-Output "DOMAIN-VAGRANT-CREATED"
+
 Write-Output "FOREST-INSTALLED-REBOOT-REQUIRED"
