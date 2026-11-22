@@ -39,6 +39,10 @@ EOF
 export HESPER_LITEVMS_DIR=/mnt/c/hesper-lab/lite-vms
 export HESPER_VM_MACHINE=dc
 export HESPER_VAGRANT_BIN=vagrant.exe
+# WSL -> Windows env forwarding: the Windows-side vagrant.exe reads these from
+# its Vagrantfile (winrm user post-promotion, box pinning) via WSLENV.
+export WSLENV="HESPER_WINRM_USER/u:HESPER_LITEVMS_DIR/u:HESPER_VM_MACHINE/u:HESPER_VAGRANT_BIN/u:HESPER_DC_BOX_VERSION/u:HESPER_NO_PRIVATE_NET/u:HESPER_HYPERV_SWITCH/u:HESPER_EVTX_COLLECT/u:HESPER_EVTX_SAMPLES/u:HESPER_CHAINSAW/u:HESPER_SIGMA_RULES/u:HESPER_SIGMA_INDEX/u"
+export HESPER_WINRM_USER="vagrant@hesper.lab"
 export HESPER_EVTX_COLLECT=1
 export HESPER_EVTX_SAMPLES="$HOME/hesper/lab/state/evtx-samples"
 export HESPER_CHAINSAW="$HOME/hesper/lab/state/bin/chainsaw"
