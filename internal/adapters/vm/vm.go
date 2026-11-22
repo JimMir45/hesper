@@ -100,6 +100,12 @@ func (a *Adapter) Execute(ctx context.Context, req adapters.ExecRequest, emit ad
 	// Stage 2: fixed-argv invocation.
 	argv := a.remoteInvocation(guestScript, guestParams)
 	stdout, exitCode, err := a.WinRM.Run(ctx, argv)
+	if exitCode != 0 {
+		if w, ok := a.WinRM.(*VagrantWinRM); ok && w.LastStderr != "" {
+			// live-run diagnostic: the transport stderr is the ground truth
+			fmt.Fprintf(os.Stderr, "vm: vagrant stderr: %s\n", w.LastStderr)
+		}
+	}
 	stdoutPath := filepath.Join(req.WorkDir, "stdout.txt")
 	if werr := os.WriteFile(stdoutPath, stdout, 0o644); werr != nil {
 		return adapters.ExecResult{}, fmt.Errorf("vm: write stdout: %w", werr)
