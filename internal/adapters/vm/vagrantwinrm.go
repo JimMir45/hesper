@@ -58,10 +58,15 @@ func (v *VagrantWinRM) factory() func(ctx context.Context, name string, arg ...s
 // ProjectDir and returns stdout plus the vagrant exit code (which mirrors
 // the guest command's exit code).
 func (v *VagrantWinRM) runVagrantWinRM(ctx context.Context, command string) ([]byte, int, error) {
-	argv := []string{"winrm", "-c", command}
+	// Machine name BEFORE -c: `vagrant winrm -c <cmd> <machine>` makes the
+	// winrm plugin split <cmd> on spaces and quote each token individually
+	// (Invoke-Expression parse explosion on the guest); machine-first is the
+	// proven-good order (verified live, m4-live run series).
+	argv := []string{"winrm"}
 	if v.Machine != "" {
 		argv = append(argv, v.Machine)
 	}
+	argv = append(argv, "-c", command)
 	bin := v.Binary
 	if bin == "" {
 		bin = "vagrant"
