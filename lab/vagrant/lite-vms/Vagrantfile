@@ -77,11 +77,11 @@ Vagrant.configure("2") do |config|
       # switch at import (auto-detect; devbox has Default Switch + WSL only)
       hv.linked_clone = true
     end
-    dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1", elevated_user: elevated_user, elevated_password: elevated_password
-    dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
-    dc.vm.provision "shell", path: "provision/20-dc-vulnad.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
-    dc.vm.provision "shell", path: "provision/30-sysmon.ps1", elevated_user: elevated_user, elevated_password: elevated_password
-    dc.vm.provision "shell", path: "provision/40-network-check.ps1", elevated_user: elevated_user, elevated_password: elevated_password
+    dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
+    dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", reboot: true
+    dc.vm.provision "shell", path: "provision/20-dc-vulnad.ps1", reboot: true
+    dc.vm.provision "shell", path: "provision/30-sysmon.ps1"
+    dc.vm.provision "shell", path: "provision/40-network-check.ps1"
   end
 
   # ---- WKST01: domain workstation + Sysmon ----
@@ -109,7 +109,7 @@ Vagrant.configure("2") do |config|
       hv.linked_clone = true
     end
     w.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
-    w.vm.provision "shell", path: "provision/10-wkst-join.ps1", elevated_user: elevated_user, elevated_password: elevated_password, reboot: true
+    w.vm.provision "shell", path: "provision/10-wkst-join.ps1", reboot: true
     w.vm.provision "shell", path: "provision/30-sysmon.ps1"
     w.vm.provision "shell", path: "provision/40-network-check.ps1"
   end
