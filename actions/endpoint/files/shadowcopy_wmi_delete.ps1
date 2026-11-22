@@ -14,7 +14,6 @@ $ErrorActionPreference = "Continue"
 $params = Get-Content -Raw -Path $ParamsFile | ConvertFrom-Json
 $outDir = if ($params.out_dir) { $params.out_dir } else { "C:\hesper\out" }
 $marker = if ($params.marker) { $params.marker } else { "shadow.marker" }
-
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $before = Get-WmiObject Win32_ShadowCopy | Select-Object ID, InstallDate

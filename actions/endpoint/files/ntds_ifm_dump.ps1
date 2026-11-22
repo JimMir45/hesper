@@ -15,7 +15,6 @@ $ErrorActionPreference = "Stop"
 $params = Get-Content -Raw -Path $ParamsFile | ConvertFrom-Json
 $outDir = if ($params.out_dir) { $params.out_dir } else { "C:\hesper\out" }
 $marker = if ($params.marker) { $params.marker } else { "dump.marker" }
-
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 # Install-From-Media: dumps NTDS.dit + SYSTEM hive into the out dir.
