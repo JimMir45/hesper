@@ -43,8 +43,8 @@ func TestVagrantWinRMUploadSingleShot(t *testing.T) {
 	if !strings.Contains(got, wantSub) {
 		t.Fatalf("command shape wrong:\n got %s\nwant-sub %s", got, wantSub)
 	}
-	if !strings.HasPrefix(got, "vagrant winrm -c ") || !strings.HasSuffix(got, " dc") {
-		t.Fatalf("argv must be 'vagrant winrm -c <cmd> dc': %q", got)
+	if !strings.HasPrefix(got, "vagrant winrm dc -c ") {
+		t.Fatalf("argv must be 'vagrant winrm dc -c <cmd>' (machine before -c — late -c values get space-split by the plugin): %q", got)
 	}
 }
 
