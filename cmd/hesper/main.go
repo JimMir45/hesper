@@ -1002,20 +1002,35 @@ func judgeIfConfigured(cfg *config.RunConfig) detection.Judge {
 }
 
 // vmAdapterIfConfigured wires the vm adapter when HESPER_LITEVMS_DIR points
-// at a lite-vms Vagrantfile project (vagrant winrm transport). Without the
-// env, runs behave exactly as before (proc-only) — the VM leg is opt-in.
+// at a lite-vms Vagrantfile project. Transport selected by HESPER_VM_TRANSPORT:
+//   psremoting (default on devbox) — PowerShell remoting from the host,
+//     creds via HESPER_VM_CRED_XML (CliXml file), guest IP via HESPER_VM_IP;
+//   vagrant (legacy) — vagrant.exe winrm CLI via interop.
+// Without HESPER_LITEVMS_DIR, runs behave exactly as before (proc-only).
 func vmAdapterIfConfigured(actionsRoot string) (adapters.Adapter, bool) {
 	dir := os.Getenv("HESPER_LITEVMS_DIR")
 	if dir == "" {
 		return nil, false
 	}
-	w := &vm.VagrantWinRM{
-		ProjectDir: dir,
-		Machine:    os.Getenv("HESPER_VM_MACHINE"), // "" = vagrant default machine
-		Binary:     os.Getenv("HESPER_VAGRANT_BIN"), // "" = "vagrant"; WSL sets vagrant.exe
+	switch os.Getenv("HESPER_VM_TRANSPORT") {
+	case "psremoting", "":
+		ip := os.Getenv("HESPER_VM_IP")
+		cred := os.Getenv("HESPER_VM_CRED_XML")
+		if ip == "" || cred == "" {
+			return nil, false
+		}
+		p := &vm.PSRemoting{CredXMLPath: cred, HostIP: ip, ActionsRoot: actionsRoot}
+		fmt.Printf("vm: psremoting transport on %s (machine dc)\n", ip)
+		return vm.New(p, actionsRoot), true
+	default:
+		w := &vm.VagrantWinRM{
+			ProjectDir: dir,
+			Machine:    os.Getenv("HESPER_VM_MACHINE"),
+			Binary:     os.Getenv("HESPER_VAGRANT_BIN"),
+		}
+		fmt.Printf("vm: vagrant-winrm transport on %s (machine %q)\n", dir, w.Machine)
+		return vm.New(w, actionsRoot), true
 	}
-	fmt.Printf("vm: vagrant-winrm transport on %s (machine %q)\n", dir, w.Machine)
-	return vm.New(w, actionsRoot), true
 }
 
 func initRunDir(dir string) error {
