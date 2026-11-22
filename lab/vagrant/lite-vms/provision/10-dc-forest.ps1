@@ -14,7 +14,18 @@ if ((Get-NetFirewallProfile | Where-Object Enabled).Count -gt 0) {
 }
 
 Import-Module ServerManager -ErrorAction SilentlyContinue
-if ((Get-Command Get-ADDomain -ErrorAction SilentlyContinue) -and (Get-ADDomain -ErrorAction SilentlyContinue)) {
+# Idempotency check via try/catch: with $ErrorActionPreference=Stop a bare
+# Get-ADDomain on a non-DC escalates past -ErrorAction SilentlyContinue and
+# kills the provisioner before promotion (attempt-6 finding).
+$domainOk = $false
+try {
+    if (Get-Command Get-ADDomain -ErrorAction SilentlyContinue) {
+        $domainOk = [bool](Get-ADDomain -ErrorAction SilentlyContinue)
+    }
+} catch {
+    $domainOk = $false
+}
+if ($domainOk) {
     Write-Output "DOMAIN-ALREADY-PRESENT"
     exit 0
 }
