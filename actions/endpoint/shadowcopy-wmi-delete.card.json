@@ -16,7 +16,7 @@
   },
   "executor": {
     "adapter": "vm",
-    "argv": ["actions/endpoint/files/shadowcopy_wmi_delete.ps1"]
+    "argv": ["endpoint/files/shadowcopy_wmi_delete.ps1"]
   },
   "evidence": { "must_capture": ["stdout", "file"] },
   "detection": {

@@ -16,7 +16,7 @@
   },
   "executor": {
     "adapter": "vm",
-    "argv": ["actions/endpoint/files/ntdsutil_snapshot.ps1"]
+    "argv": ["endpoint/files/ntdsutil_snapshot.ps1"]
   },
   "evidence": { "must_capture": ["stdout", "file"] },
   "detection": {

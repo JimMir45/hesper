@@ -16,7 +16,7 @@
   },
   "executor": {
     "adapter": "vm",
-    "argv": ["actions/endpoint/files/ntds_ifm_dump.ps1"]
+    "argv": ["endpoint/files/ntds_ifm_dump.ps1"]
   },
   "evidence": { "must_capture": ["stdout", "file"] },
   "detection": {
