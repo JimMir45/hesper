@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== pull + build =="
-git pull -q
+git pull -q || echo "git pull failed (offline mode) — using local state"
 go build -o /tmp/hesper-live ./cmd/hesper
 
 echo "== vm target =="
