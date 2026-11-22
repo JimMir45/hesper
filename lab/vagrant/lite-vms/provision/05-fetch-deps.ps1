@@ -9,10 +9,10 @@ New-Item -ItemType Directory -Force -Path C:\Hesper\deps | Out-Null
 # Dynamic gateway: works for VBox NAT and Hyper-V Default Switch alike.
 $gw = (Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Sort-Object RouteMetric |
        Select-Object -First 1).NextHop
-if (-not $gw) { throw "no default gateway — cannot locate dep server" }
+if (-not $gw) { throw "no default gateway - cannot locate dep server" }
 # Port 48999: verified free on the original shared host (18080 is owned by a
 # company SPA answering 200-with-index.html to every path; 47807 shows "in
-# use" only inside mirrored-WSL — M4-1 findings).
+# use" only inside mirrored-WSL - M4-1 findings).
 $base = "http://${gw}:48999"
 Write-Output "DEP-SERVER $base"
 
@@ -22,7 +22,7 @@ foreach ($f in @("Sysmon64.exe", "sysmonconfig.xml", "vulnAD.ps1")) {
     # port-collision incident
     Invoke-WebRequest -UseBasicParsing -Uri "$base/$f" -OutFile $out
     $len = (Get-Item $out).Length
-    if ($len -lt 1000) { throw "dep $f suspiciously small ($len bytes) — server wrong?" }
+    if ($len -lt 1000) { throw "dep $f suspiciously small ($len bytes) - server wrong?" }
     Write-Output "DEP-FETCHED $f $len bytes"
 }
 Write-Output "DEPS-FETCH-DONE"

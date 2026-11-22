@@ -1,4 +1,4 @@
-# Install Sysmon with the sysmon-modular config (olafhartong, MIT) — idempotent.
+# Install Sysmon with the sysmon-modular config (olafhartong, MIT) - idempotent.
 # Binaries are uploaded from the host fetcher (live.sysinternals.com at fetch
 # time); nothing is redistributed from this repo.
 $ErrorActionPreference = "Stop"

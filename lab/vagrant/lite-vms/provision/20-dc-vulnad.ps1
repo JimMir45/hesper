@@ -1,4 +1,4 @@
-# Inject AD misconfigurations via vulnerable-AD (safebuffer, MIT) — idempotent.
+# Inject AD misconfigurations via vulnerable-AD (safebuffer, MIT) - idempotent.
 $ErrorActionPreference = "Stop"
 Import-Module ActiveDirectory -ErrorAction Stop
 

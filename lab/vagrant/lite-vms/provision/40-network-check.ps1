@@ -1,6 +1,6 @@
 # M4-2 evidence: VM -> default gateway (host) -> portproxy/mirrored loopback
 # -> WSL lab containers. Works for VBox NAT (10.0.2.2) and Hyper-V Default
-# Switch (host vNIC IP) alike. Informational (exit 0 either way) — the run
+# Switch (host vNIC IP) alike. Informational (exit 0 either way) - the run
 # log carries the facts.
 $ErrorActionPreference = "Continue"
 

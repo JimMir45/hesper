@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force -Path C:\Hesper\provision | Out-Null
 
 # Lab posture: firewall off on all profiles (GOAD does the same; this is an
-# intentionally vulnerable range — detection comes from Sysmon, not the
+# intentionally vulnerable range - detection comes from Sysmon, not the
 # firewall). Without this, the host-only NIC lands in the Public profile and
 # domain joins fail with "domain could not be contacted".
 if ((Get-NetFirewallProfile | Where-Object Enabled).Count -gt 0) {
