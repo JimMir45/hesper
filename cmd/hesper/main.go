@@ -986,6 +986,7 @@ func vmAdapterIfConfigured(actionsRoot string) (adapters.Adapter, bool) {
 	w := &vm.VagrantWinRM{
 		ProjectDir: dir,
 		Machine:    os.Getenv("HESPER_VM_MACHINE"), // "" = vagrant default machine
+		Binary:     os.Getenv("HESPER_VAGRANT_BIN"), // "" = "vagrant"; WSL sets vagrant.exe
 	}
 	fmt.Printf("vm: vagrant-winrm transport on %s (machine %q)\n", dir, w.Machine)
 	return vm.New(w, actionsRoot), true

@@ -27,6 +27,10 @@ type VagrantWinRM struct {
 	ProjectDir string
 	// Machine is the vagrant machine name ("" = default machine).
 	Machine string
+	// Binary is the vagrant executable name/path. Default "vagrant"; set
+	// "vagrant.exe" when the engine runs inside WSL against a Windows-host
+	// vagrant (Linux LookPath won't resolve the .exe suffix on its own).
+	Binary string
 	// CommandContext is injectable for tests; defaults to exec.CommandContext.
 	CommandContext func(ctx context.Context, name string, arg ...string) *exec.Cmd
 }
@@ -55,7 +59,11 @@ func (v *VagrantWinRM) runVagrantWinRM(ctx context.Context, command string) ([]b
 	if v.Machine != "" {
 		argv = append(argv, v.Machine)
 	}
-	cmd := v.factory()(ctx, "vagrant", argv...)
+	bin := v.Binary
+	if bin == "" {
+		bin = "vagrant"
+	}
+	cmd := v.factory()(ctx, bin, argv...)
 	cmd.Dir = v.ProjectDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
