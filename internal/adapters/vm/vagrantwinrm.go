@@ -33,6 +33,9 @@ type VagrantWinRM struct {
 	Binary string
 	// CommandContext is injectable for tests; defaults to exec.CommandContext.
 	CommandContext func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// LastStderr carries the most recent vagrant-side stderr (transport/auth
+	// diagnostics) — surfaced into run evidence on failures.
+	LastStderr string
 }
 
 // singleShotLimit bounds the base64 payload for one-shot writes; larger
@@ -73,6 +76,11 @@ func (v *VagrantWinRM) runVagrantWinRM(ctx context.Context, command string) ([]b
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		code = exitErr.ExitCode()
 		err = nil // exit codes are data, not transport errors
+	}
+	// Surface vagrant-side stderr (auth failures, plugin warnings, winrm
+	// transport errors) — silent loss here cost us a live-run diagnosis loop.
+	if stderr.Len() > 0 {
+		v.LastStderr = stderr.String()
 	}
 	return stdout.Bytes(), code, err
 }

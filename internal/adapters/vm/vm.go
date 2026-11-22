@@ -112,6 +112,11 @@ func (a *Adapter) Execute(ctx context.Context, req adapters.ExecRequest, emit ad
 	// Stage 3: pull declared remote outputs (params["remote_files"],
 	// comma-separated guest paths) into the evidence WorkDir.
 	detail := fmt.Sprintf("exit=%d", exitCode)
+	if w, ok := a.WinRM.(*VagrantWinRM); ok && w.LastStderr != "" {
+		// transport/vagrant stderr is evidence on failure (§6): keep the
+		// first 300 chars in the step detail, full text stays in artifacts
+		detail += "; vagrant-stderr: " + truncRunes(w.LastStderr, 300)
+	}
 	if outs := strings.TrimSpace(req.Params["remote_files"]); outs != "" {
 		for i, guest := range strings.Split(outs, ",") {
 			guest = strings.TrimSpace(guest)
@@ -182,4 +187,12 @@ func relToWork(work, p string) string {
 		return filepath.Base(p)
 	}
 	return rel
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
