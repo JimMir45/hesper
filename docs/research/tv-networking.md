@@ -63,3 +63,23 @@ Windows VM (Vagrant/VBox, NAT)                     WSL2 (mirrored)
 - Nested-virtualization actual launch test (CPU is Intel ✓, but M4-0 preflight still runs the real check).
 - Hyper-V Firewall rule details for Fallback A.
 - `.wslconfig` memory raise for the full profile (GOAD ≥20 GB).
+
+## 7. devbox topology (2026-11-24, post-migration)
+
+The original host's VBox-under-Hyper-V path proved unusable for Windows guests
+(NEM software emulation — see the M4 live-checklist BLOCKER). The VM leg moved
+to **devbox** (Win10 Pro, i5-9400F, 16GB; Hyper-V role enabled 2026-11-24,
+WSL capped at 6GB/4CPU via .wslconfig).
+
+| Element | devbox reality |
+|---|---|
+| VM provider | **Hyper-V native** (root hypervisor — real VT-x, no NEM trap); vagrant 2.4.9 hyperv provider, `Default Switch` (no second switch created; VM↔VM and VM↔host both ride it) |
+| Box pin | StefanScherer/windows_2019 **@2020.02.12** — newest version with a `hyperv` provider (2021.05.15 ships virtualbox/vmware only; Vagrant Cloud API verified). windows_10 hyperv caps at 2020.04.15 (wkst, later). |
+| WSL networking mode | **NAT** (not mirrored) → host cannot reach WSL via loopback transparently; **`netsh interface portproxy`** on the Windows host forwards host:48999 (deps) and host:8889/18000 (Velo) to the WSL IP |
+| Dep server | WSL `python3 -m http.server 48999` on `~/provision-files` (binds 0.0.0.0), reached from VM via gateway IP (Default Switch host vNIC) → portproxy → WSL. Provision scripts compute the gateway dynamically (`Get-NetRoute 0.0.0.0/0`) — same code works on the original VBox NAT path. |
+| VM → Velo | VM → gateway:8889 → portproxy → WSL docker lab-net velociraptor (published 0.0.0.0:8889 inside WSL) |
+| Deps source | fetched on the original host (proxy needed for github there), scp'd to devbox (3.4MB) — nothing binary in-repo unchanged |
+
+Gotchas so far: winget source broken on devbox (0x8a15000f) → vagrant installed
+via direct HashiCorp MSI; Tailscale did not come back unattended after the
+Hyper-V reboot (needed one physical login — ops note, not a topology issue).

@@ -1,15 +1,21 @@
-# Fetch provision deps over the VBox NAT gateway path (10.0.2.2 -> host
-# loopback -> WSL mirrored -> http.server on provision-files/). WinRM file
-# transfer proved too slow for the 3.2MB Sysmon binary on nested-virt guests
+# Fetch provision deps over the gateway path (VM -> default gateway = host,
+# on both VBox NAT (10.0.2.2) and Hyper-V Default Switch (host vNIC IP) ->
+# portproxy/mirrored-loopback -> WSL http.server on provision-files/). WinRM
+# file transfer proved too slow for the 3.2MB Sysmon binary on slow guests
 # (M4-1 finding); this path is also the M4-2 topology under test.
 $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force -Path C:\Hesper\deps | Out-Null
 
-# Port 48999: verified free on this shared host (18080 is owned by a company
-# SPA answering 200-with-index.html to every path; 47807 shows "in use" only
-# inside mirrored-WSL despite being invisible in netstat — M4-1 findings).
-$base = "http://10.0.2.2:48999"
-$expected = @{ "Sysmon64.exe" = 3203368; "sysmonconfig.xml" = 360048; "vulnAD.ps1" = 65052 }
+# Dynamic gateway: works for VBox NAT and Hyper-V Default Switch alike.
+$gw = (Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Sort-Object RouteMetric |
+       Select-Object -First 1).NextHop
+if (-not $gw) { throw "no default gateway — cannot locate dep server" }
+# Port 48999: verified free on the original shared host (18080 is owned by a
+# company SPA answering 200-with-index.html to every path; 47807 shows "in
+# use" only inside mirrored-WSL — M4-1 findings).
+$base = "http://${gw}:48999"
+Write-Output "DEP-SERVER $base"
+
 foreach ($f in @("Sysmon64.exe", "sysmonconfig.xml", "vulnAD.ps1")) {
     $out = "C:\Hesper\deps\$f"
     # always re-fetch: cache may hold a junk 585-byte index.html from the

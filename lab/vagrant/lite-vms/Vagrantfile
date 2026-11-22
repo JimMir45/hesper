@@ -1,20 +1,24 @@
 # -*- mode: ruby -*-
 # Hesper lite-vms profile (plan.md M4-1): 1 DC (Windows Server 2019 eval) +
 # 1 workstation (Windows 10 eval). StefanScherer eval boxes (Microsoft eval
-# license, 180-day expiry; same box family GOAD-Light uses). Windows-host
-# VirtualBox provider, WinRM communicator.
+# license, 180-day expiry; same box family GOAD-Light uses). WinRM communicator.
 #
-# Layout: NAT (default, for egress + 10.0.2.2 host-loopback path to WSL)
-#         + host-only 192.168.56.0/24 for VM<->VM / domain traffic.
-# Provision deps are uploaded from HESPER_PROVISION_FILES (host-side fetcher
-# scripts/fetch-litevms-deps.ps1) — no binaries live in this repo.
+# Providers (selected by box pinning, see HESPER_DC_BOX* env):
+#   - virtualbox (original host): NAT + host-only 192.168.56.0/24
+#   - hyperv (devbox): Default Switch only; gateway-based dep fetch (the VM's
+#     default gateway IS the host on Default Switch; on VBox NAT it is
+#     10.0.2.2 — the provision scripts compute it dynamically either way).
+#
+# Provision deps are served by an http.server on the WSL side, reached via the
+# host gateway IP on port 48999 (devbox: netsh portproxy host:48999 -> WSL;
+# original host: mirrored-mode loopback). No binaries live in this repo.
 
 Vagrant.configure("2") do |config|
   files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
 
   config.vm.communicator = :winrm
-  # Windows eval boots are slow under VBox-on-Hyper-V (nested mode); GOAD uses
-  # long boot timeouts for the same reason.
+  # Windows eval boots are slow (VBox nested mode; Hyper-V on a 6-core i5 is
+  # real VT-x but still unhurried). GOAD uses long boot timeouts likewise.
   config.vm.boot_timeout = 1800
   config.winrm.username = "vagrant"
   config.winrm.password = "vagrant"
@@ -25,16 +29,30 @@ Vagrant.configure("2") do |config|
 
   # ---- DC01: forest root + vulnerable-AD + Sysmon ----
   config.vm.define "dc" do |dc|
-    dc.vm.box = "StefanScherer/windows_2019"
-    dc.vm.box_version = "2021.05.15"
+    dc.vm.box = ENV["HESPER_DC_BOX"] || "StefanScherer/windows_2019"
+    # 2021.05.15 = newest virtualbox/vmware pin (original host).
+    # hyperv provider exists only up to 2020.02.12 (Vagrant Cloud API,
+    # verified 2026-11-24) — devbox runs pin it via HESPER_DC_BOX_VERSION.
+    dc.vm.box_version = ENV["HESPER_DC_BOX_VERSION"] || "2021.05.15"
     dc.vm.hostname = "DC01"
-    dc.vm.network "private_network", ip: "192.168.56.10", netmask: "255.255.255.0"
+    # host-only net is VBox-only (Hyper-V Default Switch already provides
+    # VM<->VM and VM<->host paths; a second switch would waste 16GB-RAM box)
+    if ENV["HESPER_NO_PRIVATE_NET"].nil?
+      dc.vm.network "private_network", ip: "192.168.56.10", netmask: "255.255.255.0"
+    end
     dc.vm.provider "virtualbox" do |vb|
       vb.name = "hesper-litevms-dc01"
       vb.memory = 3072
       vb.cpus = 2
       vb.gui = false
       vb.linked_clone = true
+    end
+    dc.vm.provider "hyperv" do |hv|
+      hv.vmname = "hesper-litevms-dc01"
+      hv.memory = 3072
+      hv.cpus = 2
+      hv.virtual_switch = "Default Switch"
+      hv.linked_clone = true
     end
     dc.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
     dc.vm.provision "shell", path: "provision/10-dc-forest.ps1", reboot: true
@@ -45,15 +63,25 @@ Vagrant.configure("2") do |config|
 
   # ---- WKST01: domain workstation + Sysmon ----
   config.vm.define "wkst" do |w|
-    w.vm.box = "StefanScherer/windows_10"
+    w.vm.box = ENV["HESPER_WKST_BOX"] || "StefanScherer/windows_10"
+    w.vm.box_version = ENV["HESPER_WKST_BOX_VERSION"] || "2021.05.15"
     w.vm.hostname = "WKST01"
-    w.vm.network "private_network", ip: "192.168.56.20", netmask: "255.255.255.0"
+    if ENV["HESPER_NO_PRIVATE_NET"].nil?
+      w.vm.network "private_network", ip: "192.168.56.20", netmask: "255.255.255.0"
+    end
     w.vm.provider "virtualbox" do |vb|
       vb.name = "hesper-litevms-wkst01"
       vb.memory = 2560
       vb.cpus = 2
       vb.gui = false
       vb.linked_clone = true
+    end
+    w.vm.provider "hyperv" do |hv|
+      hv.vmname = "hesper-litevms-wkst01"
+      hv.memory = 2560
+      hv.cpus = 2
+      hv.virtual_switch = "Default Switch"
+      hv.linked_clone = true
     end
     w.vm.provision "shell", path: "provision/05-fetch-deps.ps1"
     w.vm.provision "shell", path: "provision/10-wkst-join.ps1", reboot: true
