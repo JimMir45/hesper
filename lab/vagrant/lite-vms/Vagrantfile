@@ -17,19 +17,7 @@ Vagrant.configure("2") do |config|
   files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
 
   config.vm.communicator = :winrm
-  # WinRM shell provisioners wrap scripts in an elevated scheduled task whose
-  # principal defaults to the box's vagrant account — dead after domain
-  # promotion (machine rename). Devbox (Hyper-V, promoted) pins the literal
-  # domain principal; original-host runs keep env-overridable defaults.
-  # NOTE: these are FINAL — no later assignment may overwrite them (a
-  # hardcoded literal below silently beat the env value; attempt-10 lesson).
-  elevated_user = "hesper\\vagrant"
-  elevated_password = "vagrant"
-  if ENV["HESPER_NO_PRIVATE_NET"].nil?
-    elevated_user = ENV["HESPER_WINRM_USER"] || "vagrant"
-    elevated_password = ENV["HESPER_WINRM_PASS"] || "vagrant"
-  end
-  config.winrm.username = elevated_user
+  config.winrm.username = "vagrant"
   # No default synced folder: the hyperv provider's default is SMB, which
   # prompts interactively for HOST credentials — fatal headless. Provisions
   # travel over HTTP (deps) and WinRM uploads (scripts) instead.
