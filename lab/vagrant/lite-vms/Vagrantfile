@@ -17,6 +17,10 @@ Vagrant.configure("2") do |config|
   files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
 
   config.vm.communicator = :winrm
+  # Post-promotion the DC resolves bare "vagrant" against AD (no such domain
+  # user in fresh runs) and NTLM fails — HESPER_WINRM_USER lets promoted
+  # machines re-auth with the domain-mirrored account (vagrant@hesper.lab).
+  config.winrm.username = ENV["HESPER_WINRM_USER"] || "vagrant"
   # No default synced folder: the hyperv provider's default is SMB, which
   # prompts interactively for HOST credentials — fatal headless. Provisions
   # travel over HTTP (deps) and WinRM uploads (scripts) instead.
