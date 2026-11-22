@@ -97,9 +97,12 @@ func (a *Adapter) Execute(ctx context.Context, req adapters.ExecRequest, emit ad
 		return adapters.ExecResult{}, fmt.Errorf("vm: upload params: %w", err)
 	}
 
-	// Stage 2: fixed-argv invocation.
-	argv := a.remoteInvocation(guestScript, guestParams)
-	stdout, exitCode, err := a.WinRM.Run(ctx, argv)
+	// Stage 2: fixed-argv invocation. The command travels as ONE string:
+	// Run() psQuote-wraps EACH argv element individually (path-safe, but a
+	// command line quoted per-token is a PowerShell parse explosion — the
+	// live DC run caught this; m4-live 2026-11-22).
+	cmdline := strings.Join(a.remoteInvocation(guestScript, guestParams), " ")
+	stdout, exitCode, err := a.WinRM.Run(ctx, []string{cmdline})
 	if exitCode != 0 {
 		if w, ok := a.WinRM.(*VagrantWinRM); ok && w.LastStderr != "" {
 			// live-run diagnostic: the transport stderr is the ground truth

@@ -123,13 +123,11 @@ func TestVMHappyPathCapturesAllKinds(t *testing.T) {
 	if !kinds["stdout"] || !kinds["file"] {
 		t.Fatalf("must_capture kinds missing: %v", kinds)
 	}
-	// Invocation is the fixed argv — script + params file only.
-	want := []string{
-		"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-		"-File", `C:\hesper\act-1.ps1`, "-ParamsFile", `C:\hesper\act-1.params.json`,
-	}
-	if strings.Join(h.winrm.lastArgv, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("remote argv = %v, want fixed invocation %v", h.winrm.lastArgv, want)
+	// Invocation: the command travels as ONE string (Run psQuote-wraps the
+	// whole element; per-token quoting explodes on the guest — m4-live).
+	want := "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\hesper\\act-1.ps1 -ParamsFile C:\\hesper\\act-1.params.json"
+	if len(h.winrm.lastArgv) != 1 || h.winrm.lastArgv[0] != want {
+		t.Fatalf("remote argv = %v, want single command element %q", h.winrm.lastArgv, want)
 	}
 }
 
