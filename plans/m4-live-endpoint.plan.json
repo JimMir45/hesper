@@ -1,0 +1,53 @@
+{
+  "version": "0.1",
+  "steps": [
+    {
+      "id": "m4-ntdsutil-susp",
+      "card_id": "endpoint-ntdsutil-susp-usage",
+      "class": "endpoint",
+      "target": "__VM_TARGET__",
+      "params": {
+        "out_dir": "C:\\hesper\\out",
+        "marker": "snapshot.marker",
+        "remote_files": "C:\\hesper\\out\\snapshot.marker"
+      },
+      "assertion": "ntdsutil snapshot operations execute on the live lab DC and produce process-creation telemetry (Sysmon EID 1)",
+      "repro": [
+        "vagrant up dc --provision (devbox Hyper-V)",
+        "vagrant winrm -c 'ntdsutil ac i ntds snaps create list all q q'"
+      ]
+    },
+    {
+      "id": "m4-ntds-ifm-dump",
+      "card_id": "endpoint-ntds-ifm-dump",
+      "class": "endpoint",
+      "target": "__VM_TARGET__",
+      "params": {
+        "out_dir": "C:\\hesper\\out",
+        "marker": "ifm.marker",
+        "remote_files": "C:\\hesper\\out\\ifm.marker"
+      },
+      "assertion": "NTDS.dit Install-From-Media dump completes on the live DC (T1003.003)",
+      "repro": [
+        "vagrant up dc --provision",
+        "see actions/endpoint/files/ntds_ifm_dump.ps1"
+      ]
+    },
+    {
+      "id": "m4-shadowcopy-wmi",
+      "card_id": "endpoint-shadowcopy-wmi-delete",
+      "class": "endpoint",
+      "target": "__VM_TARGET__",
+      "params": {
+        "out_dir": "C:\\hesper\\out",
+        "marker": "shadow.marker",
+        "remote_files": "C:\\hesper\\out\\shadow.marker,C:\\hesper\\out\\sysmon-operational.evtx"
+      },
+      "assertion": "WMI shadow-copy deletion telemetry is generated (expected rule fires on PowerShell/WMI logsource — Sysmon-only telemetry may yield a detection_gap, which is the finding under test)",
+      "repro": [
+        "vagrant up dc --provision",
+        "see actions/endpoint/files/shadowcopy_wmi_delete.ps1"
+      ]
+    }
+  ]
+}

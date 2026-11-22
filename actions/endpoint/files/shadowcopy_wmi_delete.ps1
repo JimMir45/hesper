@@ -31,4 +31,9 @@ $after | Format-Table -AutoSize | Tee-Object -FilePath "$outDir\after.txt"
 @("before=$($before.Count)", "after=$($after.Count)", (Get-Date -Format o)) |
     Out-File -FilePath (Join-Path $outDir $marker)
 
-Write-Output "Shadow copies before=$($before.Count) after=$($after.Count)"
+# Telemetry bundle for the offline judge (run infrastructure, not technique):
+# this card runs LAST in the m4-live plan, so the exported Sysmon log covers
+# every step of the run. The plan's remote_files pulls it into evidence; the
+# driver copies *.evtx into HESPER_EVTX_SAMPLES before correlation.
+wevtutil e Microsoft-Windows-Sysmon/Operational "$outDir\sysmon-operational.evtx" /ow:true
+Write-Output "Shadow copies before=$($before.Count) after=$($after.Count); sysmon evtx $((Get-Item "$outDir\sysmon-operational.evtx" -ErrorAction SilentlyContinue).Length) bytes"

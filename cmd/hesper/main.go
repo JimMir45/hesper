@@ -872,6 +872,15 @@ func runScripted(in scriptedRunInput) int {
 		return exitOperational
 	}
 
+	// Offline-judge glue: copy EVTX artifacts pulled from VMs into the
+	// samples dir so chainsaw sees the run's own telemetry (design §5.5;
+	// the last card exports the Sysmon log — see m4-live plan).
+	if os.Getenv("HESPER_EVTX_COLLECT") == "1" {
+		if dir := os.Getenv("HESPER_EVTX_SAMPLES"); dir != "" {
+			n := collectEVTX(filepath.Join(runDirAbs, "evidence"), dir)
+			in.audit.Append("judge.evtx_collected", map[string]any{"files": n, "dir": dir})
+		}
+	}
 	engine.CorrelateOutcomes(context.Background(), judgeIfConfigured(in.cfg), in.cfg.Judge.CorrelationWindowS, outcomes, in.audit)
 	found := findings.Build(runID, outcomes)
 	if err := writeJSON(filepath.Join(runDirAbs, "findings.json"), found); err != nil {
@@ -936,6 +945,23 @@ func mkDriverReq(card actions.Card, runID, actionID string, params map[string]st
 		Target:   kernel.Target{Kind: "host", Value: target},
 		WorkDir:  workDir,
 	}
+}
+
+// collectEVTX copies *.evtx files from the run's evidence tree into dst.
+func collectEVTX(evidenceDir, dst string) int {
+	_ = os.MkdirAll(dst, 0o755)
+	n := 0
+	_ = filepath.Walk(evidenceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.EqualFold(filepath.Ext(path), ".evtx") {
+			return nil
+		}
+		out := filepath.Join(dst, fmt.Sprintf("run_%d_%s", time.Now().UnixNano(), filepath.Base(path)))
+		if b, rerr := os.ReadFile(path); rerr == nil && os.WriteFile(out, b, 0o644) == nil {
+			n++
+		}
+		return nil
+	})
+	return n
 }
 
 // judgeIfConfigured builds the detection judge from the environment (the

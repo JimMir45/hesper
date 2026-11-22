@@ -41,6 +41,11 @@ Vagrant.configure("2") do |config|
     # VM<->VM and VM<->host paths; a second switch would waste 16GB-RAM box)
     if ENV["HESPER_NO_PRIVATE_NET"].nil?
       dc.vm.network "private_network", ip: "192.168.56.10", netmask: "255.255.255.0"
+    else
+      # Hyper-V mode: pre-answer the switch question (configure.rb prompts
+      # interactively when >1 switch exists and no bridge is pinned — fatal
+      # over headless ssh). bridge selects by switch name.
+      dc.vm.network "public_network", bridge: ENV["HESPER_HYPERV_SWITCH"] || "Default Switch"
     end
     dc.vm.provider "virtualbox" do |vb|
       vb.name = "hesper-litevms-dc01"
@@ -72,6 +77,8 @@ Vagrant.configure("2") do |config|
     w.vm.hostname = "WKST01"
     if ENV["HESPER_NO_PRIVATE_NET"].nil?
       w.vm.network "private_network", ip: "192.168.56.20", netmask: "255.255.255.0"
+    else
+      w.vm.network "public_network", bridge: ENV["HESPER_HYPERV_SWITCH"] || "Default Switch"
     end
     w.vm.provider "virtualbox" do |vb|
       vb.name = "hesper-litevms-wkst01"
