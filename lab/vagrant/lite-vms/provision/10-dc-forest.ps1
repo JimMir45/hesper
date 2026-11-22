@@ -19,6 +19,12 @@ if ((Get-Command Get-ADDomain -ErrorAction SilentlyContinue) -and (Get-ADDomain 
     exit 0
 }
 
+# StefanScherer boxes ship a blank local Administrator password; AD promotion
+# prerequisites refuse a blank admin password. Lab-only credential, set
+# before promotion (also what WinRM/SMB fall back to post-promotion).
+net user Administrator 'Hesper-L4b-Adm1n!' | Out-Null
+Write-Output "ADMIN-PASSWORD-SET"
+
 Write-Output "Installing AD-Domain-Services..."
 Install-WindowsFeature AD-Domain-Services -IncludeManagementTools | Out-Null
 
