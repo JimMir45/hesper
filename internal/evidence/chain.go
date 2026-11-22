@@ -74,6 +74,21 @@ func (c *Chain) Append(r Record) (string, error) {
 	}
 	r.Seq = c.seq
 	r.PrevHash = c.prevHash
+	// Artifact integrity at append time: any artifact without a hash gets
+	// hashed NOW against the file on disk (adapters that pre-hash keep their
+	// value; verify re-checks both cases). A missing file is an error here —
+	// evidence must be complete at the moment of chaining, not at verify.
+	runDir := filepath.Dir(filepath.Dir(c.path))
+	for i := range r.Artifacts {
+		if r.Artifacts[i].SHA256 == "" {
+			sum, err := HashFile(filepath.Join(runDir, filepath.FromSlash(r.Artifacts[i].Path)))
+			if err != nil {
+				c.seq--
+				return "", fmt.Errorf("evidence: hash artifact %s: %w", r.Artifacts[i].Path, err)
+			}
+			r.Artifacts[i].SHA256 = sum
+		}
+	}
 	hash, err := recordHash(r)
 	if err != nil {
 		c.seq--
