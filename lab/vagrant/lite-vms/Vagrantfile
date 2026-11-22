@@ -17,6 +17,10 @@ Vagrant.configure("2") do |config|
   files_dir = ENV["HESPER_PROVISION_FILES"] || "D:/hesper-lab/provision-files"
 
   config.vm.communicator = :winrm
+  # No default synced folder: the hyperv provider's default is SMB, which
+  # prompts interactively for HOST credentials — fatal headless. Provisions
+  # travel over HTTP (deps) and WinRM uploads (scripts) instead.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
   # Windows eval boots are slow (VBox nested mode; Hyper-V on a 6-core i5 is
   # real VT-x but still unhurried). GOAD uses long boot timeouts likewise.
   config.vm.boot_timeout = 1800
